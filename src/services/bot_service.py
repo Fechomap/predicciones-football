@@ -268,13 +268,13 @@ class BotService:
                 kelly_stake = self.value_detector.calculate_kelly_stake(
                     calculated_probability=probability,
                     bookmaker_odds=odds,
-                    bankroll=Config.BANKROLL if hasattr(Config, 'BANKROLL') else 1000,
-                    kelly_fraction=0.25,  # Use 25% Kelly for safety (fractional Kelly)
-                    max_stake_pct=0.05   # Max 5% of bankroll per bet
+                    bankroll=Config.BANKROLL,
+                    kelly_fraction=Config.KELLY_FRACTION,
+                    max_stake_pct=Config.MAX_STAKE_PERCENTAGE
                 )
 
                 # Convert to percentage for display
-                suggested_stake_pct = kelly_stake / (Config.BANKROLL if hasattr(Config, 'BANKROLL') else 1000) * 100
+                suggested_stake_pct = kelly_stake / Config.BANKROLL * 100
 
                 value_bet_data = {
                     "outcome": outcome,
@@ -439,7 +439,7 @@ class BotService:
 
     def _get_current_season(self, league_id: int) -> int:
         """
-        Get current season year for a league
+        Get current season year for a league based on calendar type
 
         Args:
             league_id: League ID
@@ -447,18 +447,32 @@ class BotService:
         Returns:
             Season year
         """
+        from ..api.api_football import (
+            LEAGUES_WITH_SPLIT_SEASONS,
+            CALENDAR_YEAR_LEAGUES,
+            SOUTHERN_HEMISPHERE_LEAGUES
+        )
+
         current_time = datetime.now(timezone.utc)
         current_month = current_time.month
         current_year = current_time.year
 
-        # Liga MX and split-season leagues use current year
-        LEAGUES_WITH_SPLIT_SEASONS = {262}  # Liga MX
-
+        # Calculate season based on league calendar type
         if league_id in LEAGUES_WITH_SPLIT_SEASONS:
+            # Liga MX (Apertura/Clausura): Both use current year
             return current_year
 
-        # Standard European leagues (Aug-May)
-        return current_year if current_month >= 8 else current_year - 1
+        elif league_id in CALENDAR_YEAR_LEAGUES:
+            # Nordic leagues: Season = current year
+            return current_year
+
+        elif league_id in SOUTHERN_HEMISPHERE_LEAGUES:
+            # Southern hemisphere: Jan-Jul = current year, Aug-Dec = next year
+            return current_year if current_month <= 7 else current_year + 1
+
+        else:
+            # Default: European format (Aug-May)
+            return current_year if current_month >= 8 else current_year - 1
 
     def _extract_best_odds(self, odds_data: List[Dict]) -> Dict:
         """
@@ -643,13 +657,13 @@ class BotService:
                     kelly_stake = self.value_detector.calculate_kelly_stake(
                         calculated_probability=probability,
                         bookmaker_odds=odds,
-                        bankroll=Config.BANKROLL if hasattr(Config, 'BANKROLL') else 1000,
-                        kelly_fraction=0.25,
-                        max_stake_pct=0.05
+                        bankroll=Config.BANKROLL,
+                        kelly_fraction=Config.KELLY_FRACTION,
+                        max_stake_pct=Config.MAX_STAKE_PERCENTAGE
                     )
 
                     # Convert to decimal (0.03 = 3%)
-                    suggested_stake_decimal = kelly_stake / (Config.BANKROLL if hasattr(Config, 'BANKROLL') else 1000)
+                    suggested_stake_decimal = kelly_stake / Config.BANKROLL
 
                     best_value = {
                         "outcome": outcome,

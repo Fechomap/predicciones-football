@@ -9,11 +9,25 @@ from ..utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
-# League-specific season calculation
-# Liga MX and other leagues with split seasons use current year for both Apertura and Clausura
-LEAGUES_WITH_SPLIT_SEASONS = {
-    262,  # Liga MX (Apertura: Jul-Dec, Clausura: Jan-May)
+# League calendar types for accurate season calculation
+LEAGUE_CALENDAR_TYPES = {
+    # European leagues (Aug-May): Season starts in Aug, ends in May
+    'european_aug_may': [39, 140, 78, 135, 61],  # Premier, La Liga, Bundesliga, Serie A, Ligue 1
+
+    # Split season (Apertura/Clausura): Both use current year
+    'split_season': [262],  # Liga MX
+
+    # Calendar year leagues (Mar-Nov): Season = current year
+    'calendar_year': [103, 119, 113],  # Norway, Sweden, Finland (Eliteserien, Allsvenskan, Veikkausliiga)
+
+    # Southern hemisphere (Aug-May but inverted): Season starts in Feb
+    'southern_hemisphere': [71, 128]  # Brazil Serie A, Argentina Liga Profesional
 }
+
+# Flatten for quick lookup
+LEAGUES_WITH_SPLIT_SEASONS = set(LEAGUE_CALENDAR_TYPES['split_season'])
+CALENDAR_YEAR_LEAGUES = set(LEAGUE_CALENDAR_TYPES['calendar_year'])
+SOUTHERN_HEMISPHERE_LEAGUES = set(LEAGUE_CALENDAR_TYPES['southern_hemisphere'])
 
 
 class APIFootballClient:
@@ -134,24 +148,32 @@ class APIFootballClient:
         current_month = now.month
         current_year = now.year
 
-        # Default season calculation (European leagues: Aug-May)
-        if current_month >= 8:  # Aug-Dec: use current year as season
-            default_season = current_year
-        else:  # Jan-Jul: use previous year as season
-            default_season = current_year - 1
-
         all_fixtures = []
 
         for league_id in league_ids:
             try:
-                # Use league-specific season calculation
+                # Calculate season based on league calendar type
                 if league_id in LEAGUES_WITH_SPLIT_SEASONS:
-                    # Liga MX and similar: always use current year
+                    # Liga MX (Apertura/Clausura): Both use current year
                     season = current_year
-                    logger.debug(f"League {league_id} uses split-season format, using year {season}")
+                    logger.debug(f"League {league_id} uses split-season format (year {season})")
+
+                elif league_id in CALENDAR_YEAR_LEAGUES:
+                    # Nordic leagues: Season runs Mar-Nov of same year
+                    season = current_year
+                    logger.debug(f"League {league_id} uses calendar-year format (year {season})")
+
+                elif league_id in SOUTHERN_HEMISPHERE_LEAGUES:
+                    # Southern hemisphere: Season starts in Feb/Mar
+                    # If Jan-Jul: use current year, if Aug-Dec: use next year
+                    season = current_year if current_month <= 7 else current_year + 1
+                    logger.debug(f"League {league_id} uses southern hemisphere format (year {season})")
+
                 else:
-                    # Standard European format
-                    season = default_season
+                    # Default: European format (Aug-May)
+                    # Aug-Dec: use current year, Jan-Jul: use previous year
+                    season = current_year if current_month >= 8 else current_year - 1
+                    logger.debug(f"League {league_id} uses European format (year {season})")
 
                 fixtures = self.get_fixtures(
                     league_id=league_id,

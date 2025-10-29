@@ -15,8 +15,7 @@ def setup_database():
     try:
         logger.info("Starting database setup...")
 
-        # Validate configuration
-        Config.validate()
+        # Configuration is automatically validated by Pydantic on import
         logger.info("Configuration validated")
 
         # Initialize database connection

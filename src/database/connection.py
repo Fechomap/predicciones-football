@@ -27,14 +27,16 @@ class DatabaseManager:
 
         logger.info("Initializing database connection...")
 
-        # Create engine with connection pooling
+        # Create engine with connection pooling and timeout
         self.engine = create_engine(
             Config.DATABASE_URL,
             poolclass=QueuePool,
             pool_size=5,
             max_overflow=10,
             pool_pre_ping=True,  # Verify connections before using
-            echo=False  # Set to True for SQL query logging
+            pool_timeout=30,  # Wait up to 30 seconds for connection from pool
+            echo=False,  # Set to True for SQL query logging
+            connect_args={"timeout": 15} if "sqlite" in Config.DATABASE_URL.lower() else {}
         )
 
         # Create session factory

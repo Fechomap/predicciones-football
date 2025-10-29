@@ -2,6 +2,7 @@
 from typing import List, Dict, Optional
 from datetime import datetime
 
+from ..utils.config import Config
 from ..utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -190,7 +191,7 @@ class FormAnalyzer:
     def calculate_momentum(
         recent_matches: List[Dict],
         team_id: int,
-        min_matches: int = 6
+        min_matches: int = None
     ) -> float:
         """
         Calculate team momentum (improving or declining form)
@@ -205,6 +206,10 @@ class FormAnalyzer:
         Returns:
             Momentum score (-100 to +100, positive = improving)
         """
+        # Use config value if not provided
+        if min_matches is None:
+            min_matches = Config.MOMENTUM_MIN_MATCHES
+
         if len(recent_matches) < min_matches:
             logger.debug(f"Not enough matches for momentum ({len(recent_matches)} < {min_matches})")
             return 0.0

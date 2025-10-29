@@ -31,10 +31,8 @@ class FootballBettingBot:
             logger.info("⚽ Football Betting Analytics Bot")
             logger.info("=" * 60)
 
-            # Validate configuration
-            logger.info("Validating configuration...")
-            Config.validate()
-            logger.info("✅ Configuration valid")
+            # Configuration is automatically validated by Pydantic on import
+            logger.info("✅ Configuration validated")
 
             # Initialize database
             logger.info("Initializing database...")

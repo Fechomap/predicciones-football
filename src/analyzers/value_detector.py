@@ -1,6 +1,5 @@
 """Value bet detection"""
 from typing import Dict, Optional
-from decimal import Decimal
 
 from ..utils.config import Config
 from ..utils.logger import setup_logger
@@ -189,7 +188,7 @@ class ValueDetector:
     @staticmethod
     def get_confidence_rating(
         edge: float,
-        sample_size: int = 5,
+        sample_size: int = None,
         thresholds: Dict[str, float] = None
     ) -> int:
         """
@@ -203,6 +202,10 @@ class ValueDetector:
         Returns:
             Confidence rating (1-5)
         """
+        # Use config value if not provided
+        if sample_size is None:
+            sample_size = Config.FORM_MIN_SAMPLE_SIZE
+
         # Default thresholds (configurable)
         if thresholds is None:
             thresholds = {

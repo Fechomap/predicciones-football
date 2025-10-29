@@ -1,65 +1,107 @@
-"""Configuration management"""
-import os
-from dotenv import load_dotenv
+"""Configuration management with Pydantic validation"""
+from pydantic import Field, field_validator, ConfigDict
+from pydantic_settings import BaseSettings
 from typing import List
 
-# Load environment variables
-load_dotenv()
 
+class Config(BaseSettings):
+    """Application configuration with automatic validation"""
 
-class Config:
-    """Application configuration"""
+    model_config = ConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore"
+    )
 
     # API-Football
-    RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
-    RAPIDAPI_HOST = os.getenv("RAPIDAPI_HOST", "api-football-v1.p.rapidapi.com")
+    RAPIDAPI_KEY: str = Field(..., description="API-Football API key")
+    RAPIDAPI_HOST: str = Field(
+        default="api-football-v1.p.rapidapi.com",
+        description="API-Football host"
+    )
 
     # Telegram
-    TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-    TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+    TELEGRAM_BOT_TOKEN: str = Field(..., description="Telegram bot token")
+    TELEGRAM_CHAT_ID: str = Field(..., description="Telegram chat ID")
 
     # Database
-    DATABASE_URL = os.getenv("DATABASE_URL")
+    DATABASE_URL: str = Field(..., description="Database connection URL")
 
     # Bot Configuration
-    ALERT_TIME_MINUTES = int(os.getenv("ALERT_TIME_MINUTES", "60"))
-    MINIMUM_EDGE = float(os.getenv("MINIMUM_EDGE", "0.05"))
-    CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "30"))
-    MIN_CONFIDENCE = int(os.getenv("MIN_CONFIDENCE", "3"))
-    MAX_ALERTS_PER_DAY = int(os.getenv("MAX_ALERTS_PER_DAY", "10"))
+    ALERT_TIME_MINUTES: int = Field(default=60, ge=1, le=1440, description="Alert time before match")
+    MINIMUM_EDGE: float = Field(default=0.05, ge=0.0, le=1.0, description="Minimum edge for value bet")
+    CHECK_INTERVAL: int = Field(default=30, ge=1, le=3600, description="Check interval in seconds")
+    MIN_CONFIDENCE: int = Field(default=3, ge=1, le=5, description="Minimum confidence rating")
+    MAX_ALERTS_PER_DAY: int = Field(default=10, ge=1, le=100, description="Maximum alerts per day")
 
     # Bankroll Management
-    BANKROLL = float(os.getenv("BANKROLL", "1000"))  # Default $1000 bankroll
+    BANKROLL: float = Field(default=1000.0, gt=0, description="Total bankroll amount")
+    KELLY_FRACTION: float = Field(default=0.25, gt=0, le=1.0, description="Kelly fraction for safety")
+    MAX_STAKE_PERCENTAGE: float = Field(default=0.05, gt=0, le=1.0, description="Max stake as % of bankroll")
+
+    # Form Analysis
+    MOMENTUM_MIN_MATCHES: int = Field(default=6, ge=3, le=20, description="Min matches for momentum")
+    FORM_MIN_SAMPLE_SIZE: int = Field(default=5, ge=1, le=20, description="Min sample for confidence")
 
     # Leagues
-    ENABLED_LEAGUES: List[int] = [
-        int(league_id.strip())
-        for league_id in os.getenv("ENABLED_LEAGUES", "262").split(",")
-    ]
+    ENABLED_LEAGUES: str = Field(default="262", description="Comma-separated league IDs")
 
     # Railway
-    RAILWAY_ENVIRONMENT = os.getenv("RAILWAY_ENVIRONMENT", "development")
-    PORT = int(os.getenv("PORT", "8000"))
+    RAILWAY_ENVIRONMENT: str = Field(default="development", description="Railway environment")
+    PORT: int = Field(default=8000, ge=1, le=65535, description="Server port")
 
     # Logging
-    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+    LOG_LEVEL: str = Field(default="INFO", description="Logging level")
 
+    @field_validator("ENABLED_LEAGUES")
     @classmethod
-    def validate(cls) -> bool:
-        """Validate required configuration"""
-        required = [
-            ("RAPIDAPI_KEY", cls.RAPIDAPI_KEY),
-            ("TELEGRAM_BOT_TOKEN", cls.TELEGRAM_BOT_TOKEN),
-            ("TELEGRAM_CHAT_ID", cls.TELEGRAM_CHAT_ID),
-            ("DATABASE_URL", cls.DATABASE_URL),
-        ]
+    def parse_enabled_leagues(cls, v: str) -> List[int]:
+        """Parse comma-separated league IDs into list of integers"""
+        try:
+            return [int(league_id.strip()) for league_id in v.split(",")]
+        except ValueError as e:
+            raise ValueError(f"Invalid league IDs format: {v}. Must be comma-separated integers.") from e
 
-        missing = [name for name, value in required if not value]
+    @field_validator("LOG_LEVEL")
+    @classmethod
+    def validate_log_level(cls, v: str) -> str:
+        """Validate log level is valid"""
+        valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        v_upper = v.upper()
+        if v_upper not in valid_levels:
+            raise ValueError(f"Invalid log level: {v}. Must be one of {valid_levels}")
+        return v_upper
 
-        if missing:
-            raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+    @field_validator("MINIMUM_EDGE")
+    @classmethod
+    def validate_minimum_edge(cls, v: float) -> float:
+        """Validate minimum edge is reasonable"""
+        if v < 0.01:
+            raise ValueError("MINIMUM_EDGE too low (< 1%). Recommended: 0.05 (5%)")
+        if v > 0.5:
+            raise ValueError("MINIMUM_EDGE too high (> 50%). Recommended: 0.05-0.15")
+        return v
 
-        return True
+    @field_validator("KELLY_FRACTION")
+    @classmethod
+    def validate_kelly_fraction(cls, v: float) -> float:
+        """Validate Kelly fraction is safe"""
+        if v > 0.5:
+            raise ValueError("KELLY_FRACTION > 0.5 is risky. Recommended: 0.25 (quarter Kelly)")
+        return v
+
+
+# Create singleton instance with validation
+try:
+    config = Config()
+except Exception as e:
+    print(f"❌ Configuration validation error: {e}")
+    print("Please check your .env file and ensure all required variables are set correctly.")
+    raise
+
+# Backward compatibility: expose config as class-like object
+Config = config  # type: ignore
 
 
 # League configurations

@@ -16,8 +16,8 @@ async def test_telegram():
     try:
         logger.info("Testing Telegram bot connection...")
 
-        # Validate config
-        Config.validate()
+        # Configuration is automatically validated by Pydantic on import
+        logger.info("Configuration validated")
 
         # Create notifier
         notifier = TelegramNotifier()
