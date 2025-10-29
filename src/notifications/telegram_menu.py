@@ -36,7 +36,7 @@ class TelegramMenu:
     def __init__(self, bot_service: "BotService"):
         """Initialize menu"""
         self.bot_service = bot_service
-        logger.info("Telegram menu initialized")
+        logger.debug("Telegram menu initialized")
 
     @staticmethod
     def get_persistent_keyboard() -> ReplyKeyboardMarkup:

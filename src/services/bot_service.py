@@ -1,6 +1,6 @@
 """Main bot service orchestrating all components"""
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict
 
 from ..api import APIFootballClient
@@ -75,7 +75,8 @@ class BotService:
         Returns:
             Fixtures that should trigger alerts
         """
-        now = datetime.now()
+        # Use timezone-aware UTC datetime for consistency with API
+        now = datetime.now(timezone.utc)
         alert_window_start = now + timedelta(minutes=Config.ALERT_TIME_MINUTES - 10)
         alert_window_end = now + timedelta(minutes=Config.ALERT_TIME_MINUTES + 10)
 
@@ -85,7 +86,8 @@ class BotService:
             fixture_info = fixture.get("fixture", {})
             fixture_id = fixture_info.get("id")
             kickoff_timestamp = fixture_info.get("timestamp", 0)
-            kickoff_time = datetime.fromtimestamp(kickoff_timestamp)
+            # Convert timestamp to timezone-aware datetime
+            kickoff_time = datetime.fromtimestamp(kickoff_timestamp, tz=timezone.utc)
 
             # Check if in alert window
             if alert_window_start <= kickoff_time <= alert_window_end:
@@ -150,9 +152,60 @@ class BotService:
             expected_away
         )
 
-        # Get form analysis (simplified)
-        home_form = {"form_string": "WWDWL", "points": 10}  # Mock
-        away_form = {"form_string": "LLWDL", "points": 4}   # Mock
+        # Get REAL form analysis from recent matches
+        logger.info(f"Calculating real form for teams {home_team_id} vs {away_team_id}")
+
+        # Get recent matches for form analysis
+        # For now, use a simplified approach with available data
+        # TODO: In future, fetch actual recent matches from API
+        try:
+            # Try to get recent fixtures for each team
+            # Using get_fixtures with team parameter would require API modification
+            # For MVP, calculate based on season statistics
+            home_stats_data = self.api_client.get_team_statistics(
+                team_id=home_team_id,
+                league_id=league_id,
+                season=self._get_current_season(league_id)
+            )
+            away_stats_data = self.api_client.get_team_statistics(
+                team_id=away_team_id,
+                league_id=league_id,
+                season=self._get_current_season(league_id)
+            )
+
+            # Extract form string from API (if available)
+            home_form_string = home_stats_data.get("form", "N/A") if home_stats_data else "N/A"
+            away_form_string = away_stats_data.get("form", "N/A") if away_stats_data else "N/A"
+
+            # Calculate points from form string
+            def calculate_points_from_form(form_string: str) -> int:
+                """Calculate points from form string (W=3, D=1, L=0)"""
+                if not form_string or form_string == "N/A":
+                    return 0
+                points = 0
+                for result in form_string[-5:]:  # Last 5 matches
+                    if result == 'W':
+                        points += 3
+                    elif result == 'D':
+                        points += 1
+                return points
+
+            home_form = {
+                "form_string": home_form_string[-5:] if len(home_form_string) >= 5 else home_form_string,
+                "points": calculate_points_from_form(home_form_string)
+            }
+            away_form = {
+                "form_string": away_form_string[-5:] if len(away_form_string) >= 5 else away_form_string,
+                "points": calculate_points_from_form(away_form_string)
+            }
+
+            logger.info(f"Home form: {home_form}, Away form: {away_form}")
+
+        except Exception as e:
+            logger.error(f"Error getting real form data: {e}, using defaults")
+            # Fallback to neutral values if API fails
+            home_form = {"form_string": "N/A", "points": 0}
+            away_form = {"form_string": "N/A", "points": 0}
 
         # Extract best odds for 1X2
         best_odds = self._extract_best_odds(odds_data)
@@ -211,6 +264,18 @@ class BotService:
                     )
                 }
 
+                # Calculate optimal stake using Kelly Criterion
+                kelly_stake = self.value_detector.calculate_kelly_stake(
+                    calculated_probability=probability,
+                    bookmaker_odds=odds,
+                    bankroll=Config.BANKROLL if hasattr(Config, 'BANKROLL') else 1000,
+                    kelly_fraction=0.25,  # Use 25% Kelly for safety (fractional Kelly)
+                    max_stake_pct=0.05   # Max 5% of bankroll per bet
+                )
+
+                # Convert to percentage for display
+                suggested_stake_pct = kelly_stake / (Config.BANKROLL if hasattr(Config, 'BANKROLL') else 1000) * 100
+
                 value_bet_data = {
                     "outcome": outcome,
                     "calculated_probability": probability,
@@ -218,7 +283,7 @@ class BotService:
                     "edge": value_result["edge"],
                     "implied_probability": value_result["implied_probability"],
                     "expected_value": value_result["expected_value"],
-                    "suggested_stake": 3  # Fixed 3% for now
+                    "suggested_stake": round(suggested_stake_pct, 2)  # Kelly Criterion %
                 }
 
                 message_id = await self.telegram.send_value_bet_alert(
@@ -246,10 +311,10 @@ class BotService:
             Team stats dictionary
         """
         try:
-            # Determine current season
-            from datetime import datetime
-            current_month = datetime.utcnow().month
-            current_year = datetime.utcnow().year
+            # Determine current season using timezone-aware datetime
+            current_time = datetime.now(timezone.utc)
+            current_month = current_time.month
+            current_year = current_time.year
             current_season = current_year if current_month >= 8 else current_year - 1
 
             # Get stats from API
@@ -297,12 +362,11 @@ class BotService:
         Returns:
             Dictionary with stats and form
         """
-        from datetime import datetime
-
         try:
-            # Determine current season
-            current_month = datetime.utcnow().month
-            current_year = datetime.utcnow().year
+            # Determine current season using timezone-aware datetime
+            current_time = datetime.now(timezone.utc)
+            current_month = current_time.month
+            current_year = current_time.year
             current_season = current_year if current_month >= 8 else current_year - 1
 
             # Get team statistics from API
@@ -372,6 +436,29 @@ class BotService:
             return {"home_matches": 10, "home_goals_scored": 15, "home_goals_conceded": 10}
         else:
             return {"away_matches": 10, "away_goals_scored": 12, "away_goals_conceded": 12}
+
+    def _get_current_season(self, league_id: int) -> int:
+        """
+        Get current season year for a league
+
+        Args:
+            league_id: League ID
+
+        Returns:
+            Season year
+        """
+        current_time = datetime.now(timezone.utc)
+        current_month = current_time.month
+        current_year = current_time.year
+
+        # Liga MX and split-season leagues use current year
+        LEAGUES_WITH_SPLIT_SEASONS = {262}  # Liga MX
+
+        if league_id in LEAGUES_WITH_SPLIT_SEASONS:
+            return current_year
+
+        # Standard European leagues (Aug-May)
+        return current_year if current_month >= 8 else current_year - 1
 
     def _extract_best_odds(self, odds_data: List[Dict]) -> Dict:
         """
@@ -551,11 +638,24 @@ class BotService:
                 if value_result["is_value_bet"] and value_result["edge"] > best_edge:
                     has_value = True
                     best_edge = value_result["edge"]
+
+                    # Calculate optimal stake using Kelly Criterion
+                    kelly_stake = self.value_detector.calculate_kelly_stake(
+                        calculated_probability=probability,
+                        bookmaker_odds=odds,
+                        bankroll=Config.BANKROLL if hasattr(Config, 'BANKROLL') else 1000,
+                        kelly_fraction=0.25,
+                        max_stake_pct=0.05
+                    )
+
+                    # Convert to decimal (0.03 = 3%)
+                    suggested_stake_decimal = kelly_stake / (Config.BANKROLL if hasattr(Config, 'BANKROLL') else 1000)
+
                     best_value = {
                         "outcome": outcome,
                         "edge": value_result["edge"],
                         "confidence": self.value_detector.get_confidence_rating(value_result["edge"]),
-                        "suggested_stake": 0.03  # 3%
+                        "suggested_stake": round(suggested_stake_decimal, 4)  # Kelly Criterion as decimal
                     }
 
             # Extract API predictions (handle empty or missing data)
@@ -567,6 +667,21 @@ class BotService:
                 api_percent = api_pred.get("percent", {}) if api_pred else {}
                 logger.debug(f"API percent data: {api_percent}")
 
+            # Helper function to safely parse percentage values
+            def safe_parse_percent(value) -> float:
+                """Safely parse percentage values from API"""
+                if not value:
+                    return 0.0
+                try:
+                    # Handle both numeric and string types
+                    if isinstance(value, (int, float)):
+                        return float(value) / 100
+                    # Handle string type
+                    return float(str(value).rstrip("%")) / 100
+                except (ValueError, AttributeError, TypeError) as e:
+                    logger.warning(f"Could not parse percentage value: {value}, error: {e}")
+                    return 0.0
+
             # Build analysis result with BOTH predictions
             return {
                 "has_value": has_value,
@@ -576,9 +691,9 @@ class BotService:
                     "away": probabilities["away_win"]
                 },
                 "api_prediction": {
-                    "home": float(api_percent.get("home", "0").rstrip("%")) / 100 if api_percent.get("home") else 0,
-                    "draw": float(api_percent.get("draw", "0").rstrip("%")) / 100 if api_percent.get("draw") else 0,
-                    "away": float(api_percent.get("away", "0").rstrip("%")) / 100 if api_percent.get("away") else 0,
+                    "home": safe_parse_percent(api_percent.get("home")),
+                    "draw": safe_parse_percent(api_percent.get("draw")),
+                    "away": safe_parse_percent(api_percent.get("away")),
                     "winner": api_pred.get("winner", {}).get("name") if api_pred else None,
                     "advice": api_pred.get("advice") if api_pred else None
                 },

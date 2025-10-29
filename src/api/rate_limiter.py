@@ -61,10 +61,16 @@ class RateLimiter:
                     )
                     time.sleep(sleep_time)
 
-                    # Clean up old requests after sleeping
+                    # Re-validate after sleeping to prevent race conditions
                     now = time.time()
                     while self.requests and self.requests[0] < now - self.time_window:
                         self.requests.popleft()
+
+                    # Ensure we can actually proceed after sleeping
+                    if len(self.requests) >= self.max_requests:
+                        logger.error(f"Rate limit still exceeded after sleep ({len(self.requests)}/{self.max_requests})")
+                        # Additional small backoff to be safe
+                        time.sleep(0.5)
 
             # Add current request
             self.requests.append(now)

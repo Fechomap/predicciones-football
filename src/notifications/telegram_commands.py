@@ -30,7 +30,7 @@ class TelegramCommandBot:
         if not Config.TELEGRAM_BOT_TOKEN:
             raise ValueError("TELEGRAM_BOT_TOKEN not configured")
 
-        logger.info("Telegram command bot initialized")
+        logger.debug("Telegram command bot initialized")
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command - Show main menu"""

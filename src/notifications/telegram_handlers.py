@@ -21,7 +21,7 @@ class TelegramHandlers:
         """Initialize handlers"""
         self.bot_service = bot_service
         self.menu = TelegramMenu(bot_service)
-        logger.info("Telegram handlers initialized")
+        logger.debug("Telegram handlers initialized")
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """

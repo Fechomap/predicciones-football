@@ -15,7 +15,7 @@ class FixturesService:
     def __init__(self, data_collector: DataCollector):
         """Initialize fixtures service"""
         self.data_collector = data_collector
-        logger.info("Fixtures service initialized")
+        logger.debug("Fixtures service initialized")
 
     def get_upcoming_fixtures(self, hours_ahead: int = 168, force_refresh: bool = False) -> List[Dict]:
         """
@@ -77,7 +77,15 @@ class FixturesService:
                 # Check if data is fresh (last update < 1 hour ago)
                 # We check the newest created_at timestamp
                 newest_fixture = max(fixtures, key=lambda f: f.created_at)
-                data_age_hours = (now - newest_fixture.created_at).total_seconds() / 3600
+                time_delta = (now - newest_fixture.created_at).total_seconds()
+
+                # Validate time delta is not negative (future timestamp bug)
+                if time_delta < 0:
+                    logger.warning(f"Future timestamp detected for fixture: {newest_fixture.created_at} > {now}")
+                    logger.info("Invalidating cache due to timestamp inconsistency")
+                    return []
+
+                data_age_hours = time_delta / 3600
 
                 if data_age_hours > 1:
                     logger.info(f"Database fixtures are {data_age_hours:.1f}h old, will refresh from API")

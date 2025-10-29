@@ -28,6 +28,9 @@ class Config:
     MIN_CONFIDENCE = int(os.getenv("MIN_CONFIDENCE", "3"))
     MAX_ALERTS_PER_DAY = int(os.getenv("MAX_ALERTS_PER_DAY", "10"))
 
+    # Bankroll Management
+    BANKROLL = float(os.getenv("BANKROLL", "1000"))  # Default $1000 bankroll
+
     # Leagues
     ENABLED_LEAGUES: List[int] = [
         int(league_id.strip())

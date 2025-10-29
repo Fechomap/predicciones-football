@@ -2,6 +2,7 @@
 import numpy as np
 from scipy.stats import poisson
 from typing import Dict, Tuple
+from math import floor
 
 from ..utils.logger import setup_logger
 
@@ -51,6 +52,12 @@ class PoissonAnalyzer:
         if league_avg_goals is None:
             league_avg_goals = LEAGUE_AVG_GOALS.get(league_id, DEFAULT_LEAGUE_AVG)
             logger.debug(f"Using league avg goals: {league_avg_goals} for league {league_id}")
+
+        # Validate league_avg_goals to prevent division by zero
+        if league_avg_goals <= 0:
+            logger.warning(f"Invalid league_avg_goals: {league_avg_goals}, using default: {DEFAULT_LEAGUE_AVG}")
+            league_avg_goals = DEFAULT_LEAGUE_AVG
+
         # Extract stats
         home_matches = home_team_stats.get("home_matches", 1)
         home_scored = home_team_stats.get("home_goals_scored", 0)
@@ -60,12 +67,21 @@ class PoissonAnalyzer:
         away_scored = away_team_stats.get("away_goals_scored", 0)
         away_conceded = away_team_stats.get("away_goals_conceded", 0)
 
-        # Calculate averages (avoid division by zero)
-        home_attack_avg = home_scored / max(home_matches, 1)
-        home_defense_avg = home_conceded / max(home_matches, 1)
+        # Validate and log data quality issues
+        if home_matches <= 0:
+            logger.warning(f"Invalid home_matches: {home_matches}, using default value of 1")
+            home_matches = 1
 
-        away_attack_avg = away_scored / max(away_matches, 1)
-        away_defense_avg = away_conceded / max(away_matches, 1)
+        if away_matches <= 0:
+            logger.warning(f"Invalid away_matches: {away_matches}, using default value of 1")
+            away_matches = 1
+
+        # Calculate averages (now with explicit validation and logging)
+        home_attack_avg = home_scored / home_matches
+        home_defense_avg = home_conceded / home_matches
+
+        away_attack_avg = away_scored / away_matches
+        away_defense_avg = away_conceded / away_matches
 
         # Calculate attack and defense strengths relative to league average
         home_attack_strength = home_attack_avg / league_avg_goals
@@ -144,7 +160,10 @@ class PoissonAnalyzer:
         threshold: float = 2.5
     ) -> Dict[str, float]:
         """
-        Calculate over/under goal probabilities
+        Calculate over/under goal probabilities using CDF
+
+        More efficient and accurate than iterating through goals.
+        Uses Poisson cumulative distribution function (CDF).
 
         Args:
             expected_home_goals: Expected home team goals
@@ -156,15 +175,11 @@ class PoissonAnalyzer:
         """
         total_expected_goals = expected_home_goals + expected_away_goals
 
-        # Calculate probability of each total goals outcome
-        over_prob = 0.0
-
-        for goals in range(0, 20):  # Check up to 20 total goals
-            prob = poisson.pmf(goals, total_expected_goals)
-            if goals > threshold:
-                over_prob += prob
-
-        under_prob = 1 - over_prob
+        # Use Poisson CDF for efficiency and accuracy
+        # For "over 2.5", we want P(goals >= 3) = 1 - P(goals <= 2)
+        # P(goals <= 2) = poisson.cdf(2, lambda)
+        under_prob = poisson.cdf(floor(threshold), total_expected_goals)
+        over_prob = 1 - under_prob
 
         result = {
             f"over_{threshold}": round(over_prob, 4),
@@ -183,12 +198,15 @@ class PoissonAnalyzer:
         """
         Calculate Both Teams To Score (BTTS) probability
 
+        BTTS = P(home scores ≥1) × P(away scores ≥1)
+             = (1 - P(home=0)) × (1 - P(away=0))
+
         Args:
             expected_home_goals: Expected home team goals
             expected_away_goals: Expected away team goals
 
         Returns:
-            BTTS probability as percentage
+            BTTS probability (0-1)
         """
         # Probability that home team scores 0 goals
         home_no_score = poisson.pmf(0, expected_home_goals)
@@ -196,8 +214,9 @@ class PoissonAnalyzer:
         # Probability that away team scores 0 goals
         away_no_score = poisson.pmf(0, expected_away_goals)
 
-        # BTTS probability = 1 - (either team doesn't score)
-        btts_prob = 1 - (home_no_score + away_no_score - home_no_score * away_no_score)
+        # BTTS = Both teams score at least 1 goal
+        # More intuitive formula: multiply probabilities of each team scoring
+        btts_prob = (1 - home_no_score) * (1 - away_no_score)
 
         result = round(btts_prob, 4)
 

@@ -26,7 +26,7 @@ class TelegramNotifier:
         self.chat_id = Config.TELEGRAM_CHAT_ID
         self.formatter = MessageFormatter()
 
-        logger.info("Telegram notifier initialized")
+        logger.debug("Telegram notifier initialized")
 
     async def send_message(
         self,

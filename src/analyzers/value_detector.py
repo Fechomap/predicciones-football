@@ -27,7 +27,13 @@ class ValueDetector:
         Returns:
             Implied probability (0-1, NOT percentage)
         """
+        # Validate odds before calculation
+        if odds <= 0:
+            logger.error(f"Invalid odds: {odds}, odds must be positive")
+            raise ValueError(f"Odds must be positive, got {odds}")
+
         if odds <= 1.0:
+            logger.warning(f"Unusual odds: {odds}, capping probability at 1.0")
             return 1.0
 
         implied_prob = 1 / odds
@@ -160,6 +166,11 @@ class ValueDetector:
         q = 1 - p
         b = bookmaker_odds - 1
 
+        # Handle edge case: odds of 1.0 or less (no profit)
+        if b <= 0:
+            logger.warning(f"Invalid odds for Kelly Criterion: {bookmaker_odds} (b={b})")
+            return 0.0
+
         # Full Kelly percentage
         kelly_pct = (b * p - q) / b
 
@@ -225,7 +236,8 @@ class ValueDetector:
         Remove bookmaker margin (overround) from odds
 
         CORRECTED FORMULA:
-        Fair Odds = Total Implied Prob / Individual Implied Prob
+        Fair probability = Individual implied prob / Total implied prob
+        Fair odds = 1 / Fair probability
 
         Args:
             odds_list: List of decimal odds for all outcomes
@@ -233,12 +245,19 @@ class ValueDetector:
         Returns:
             List of fair odds without margin
         """
+        # Validate input
+        if not odds_list or any(o <= 0 for o in odds_list):
+            logger.error(f"Invalid odds list for margin removal: {odds_list}")
+            return odds_list  # Return original if invalid
+
         # Calculate total implied probability (overround)
         # e.g., if odds are [2.0, 3.5, 4.0], total = 0.5 + 0.286 + 0.25 = 1.036
         total_implied_prob = sum(1 / odds for odds in odds_list)
 
-        # Calculate fair odds by normalizing (CORRECT FORMULA)
-        # Fair odds = 1 / (implied_prob / total_implied_prob)
+        # Calculate fair odds by normalizing
+        # Fair probability = (1 / odds) / total_implied_probability
+        # Fair odds = 1 / Fair probability = total_implied_prob / (1 / odds)
+        # Which simplifies to: total_implied_prob * odds
         fair_odds = [
             round(total_implied_prob / (1 / odds), 2)
             for odds in odds_list

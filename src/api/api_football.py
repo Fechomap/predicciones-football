@@ -1,6 +1,6 @@
 """API-Football client"""
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any
 
 from .rate_limiter import RateLimiter
@@ -8,6 +8,12 @@ from ..utils.config import Config
 from ..utils.logger import setup_logger
 
 logger = setup_logger(__name__)
+
+# League-specific season calculation
+# Liga MX and other leagues with split seasons use current year for both Apertura and Clausura
+LEAGUES_WITH_SPLIT_SEASONS = {
+    262,  # Liga MX (Apertura: Jul-Dec, Clausura: Jan-May)
+}
 
 
 class APIFootballClient:
@@ -28,7 +34,7 @@ class APIFootballClient:
         # Using conservative 250/min to have margin
         self.rate_limiter = RateLimiter(max_requests=250, time_window=60)
 
-        logger.info("API-Football client initialized")
+        logger.debug("API-Football client initialized")
 
     def _make_request(self, endpoint: str, params: Optional[Dict] = None) -> Dict[str, Any]:
         """
@@ -120,32 +126,42 @@ class APIFootballClient:
         Returns:
             List of upcoming fixtures
         """
-        date_from = datetime.utcnow().strftime("%Y-%m-%d")
-        date_to = (datetime.utcnow() + timedelta(hours=hours_ahead)).strftime("%Y-%m-%d")
+        # Use timezone-aware datetime
+        now = datetime.now(timezone.utc)
+        date_from = now.strftime("%Y-%m-%d")
+        date_to = (now + timedelta(hours=hours_ahead)).strftime("%Y-%m-%d")
 
-        # Football seasons usually run from Aug-May
-        # Season year = year when season starts (Aug-Dec uses current year, Jan-Jul uses previous year)
-        current_month = datetime.utcnow().month
-        current_year = datetime.utcnow().year
+        current_month = now.month
+        current_year = now.year
 
+        # Default season calculation (European leagues: Aug-May)
         if current_month >= 8:  # Aug-Dec: use current year as season
-            current_season = current_year
+            default_season = current_year
         else:  # Jan-Jul: use previous year as season
-            current_season = current_year - 1
+            default_season = current_year - 1
 
         all_fixtures = []
 
         for league_id in league_ids:
             try:
+                # Use league-specific season calculation
+                if league_id in LEAGUES_WITH_SPLIT_SEASONS:
+                    # Liga MX and similar: always use current year
+                    season = current_year
+                    logger.debug(f"League {league_id} uses split-season format, using year {season}")
+                else:
+                    # Standard European format
+                    season = default_season
+
                 fixtures = self.get_fixtures(
                     league_id=league_id,
-                    season=current_season,
+                    season=season,
                     date_from=date_from,
                     date_to=date_to,
                     status="NS"
                 )
                 all_fixtures.extend(fixtures)
-                logger.info(f"Found {len(fixtures)} upcoming fixtures for league {league_id} (season {current_season})")
+                logger.info(f"Found {len(fixtures)} upcoming fixtures for league {league_id} (season {season})")
             except Exception as e:
                 logger.error(f"Failed to fetch fixtures for league {league_id}: {e}")
 
@@ -307,18 +323,3 @@ class APIFootballClient:
         response = self._make_request("standings", params)
 
         return response.get("response", [])
-
-    def get_predictions(self, fixture_id: int) -> Dict:
-        """
-        Get API predictions for a fixture (if available)
-
-        Args:
-            fixture_id: Fixture ID
-
-        Returns:
-            Predictions data
-        """
-        logger.info(f"Fetching predictions for fixture {fixture_id}")
-        response = self._make_request("predictions", {"fixture": fixture_id})
-
-        return response.get("response", {})

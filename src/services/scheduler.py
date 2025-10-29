@@ -24,7 +24,7 @@ class BotScheduler:
         self.bot_service = bot_service
         self.scheduler = AsyncIOScheduler()
 
-        logger.info("Scheduler initialized")
+        logger.debug("Scheduler initialized")
 
     def start(self):
         """Start the scheduler"""

@@ -16,7 +16,7 @@ class DataCollector:
     def __init__(self):
         """Initialize data collector"""
         self.api_client = APIFootballClient()
-        logger.info("Data collector initialized")
+        logger.debug("Data collector initialized")
 
     def sync_leagues(self):
         """Sync configured leagues to database"""
@@ -83,11 +83,14 @@ class DataCollector:
                 existing = session.query(Fixture).filter_by(id=fixture_id).first()
 
                 if existing:
-                    # Update existing fixture
+                    # Update existing fixture with timestamp validation
+                    timestamp = fixture_info.get("timestamp", 0)
+                    if timestamp <= 0:
+                        logger.error(f"Invalid timestamp for fixture {fixture_id}: {timestamp}")
+                        continue
+
                     existing.status = fixture_info.get("status", {}).get("short", "NS")
-                    existing.kickoff_time = datetime.fromtimestamp(
-                        fixture_info.get("timestamp", 0)
-                    )
+                    existing.kickoff_time = datetime.fromtimestamp(timestamp)
                 else:
                     # Extract data
                     teams = fixture_data.get("teams", {})
@@ -113,15 +116,19 @@ class DataCollector:
                         league_id
                     )
 
+                    # Validate timestamp before creating fixture
+                    timestamp = fixture_info.get("timestamp", 0)
+                    if timestamp <= 0:
+                        logger.error(f"Invalid timestamp for new fixture {fixture_id}: {timestamp}")
+                        continue
+
                     # Create new fixture
                     new_fixture = Fixture(
                         id=fixture_id,
                         league_id=league_id,
                         home_team_id=home_team_id,
                         away_team_id=away_team_id,
-                        kickoff_time=datetime.fromtimestamp(
-                            fixture_info.get("timestamp", 0)
-                        ),
+                        kickoff_time=datetime.fromtimestamp(timestamp),
                         status=fixture_info.get("status", {}).get("short", "NS"),
                         venue=fixture_info.get("venue", {}).get("name"),
                         round=league.get("round")
@@ -196,7 +203,17 @@ class DataCollector:
 
                     for value in bet.get("values", []):
                         outcome = value.get("value")
-                        odds = value.get("odd")
+                        odds_raw = value.get("odd")
+
+                        # Validate and convert odds to float
+                        try:
+                            odds = float(odds_raw)
+                            if odds <= 0:
+                                logger.warning(f"Invalid odds value: {odds}, skipping")
+                                continue
+                        except (ValueError, TypeError) as e:
+                            logger.error(f"Cannot convert odds to float: {odds_raw}, error: {e}")
+                            continue
 
                         # Create odds record
                         odds_record = OddsHistory(
