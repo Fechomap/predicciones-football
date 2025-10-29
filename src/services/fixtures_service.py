@@ -79,11 +79,25 @@ class FixturesService:
                 newest_fixture = max(fixtures, key=lambda f: f.created_at)
                 time_delta = (now - newest_fixture.created_at).total_seconds()
 
-                # Validate time delta is not negative (future timestamp bug)
-                if time_delta < 0:
-                    logger.warning(f"Future timestamp detected for fixture: {newest_fixture.created_at} > {now}")
+                # Validate time delta with tolerance for clock differences
+                # Allow up to 5 minutes of future timestamp (clock skew tolerance)
+                CLOCK_SKEW_TOLERANCE = 300  # 5 minutes in seconds
+
+                if time_delta < -CLOCK_SKEW_TOLERANCE:
+                    # Only invalidate if timestamp is more than 5 min in the future
+                    logger.warning(
+                        f"Fixture timestamp significantly in future: "
+                        f"{newest_fixture.created_at} > {now} (delta: {-time_delta:.0f}s)"
+                    )
                     logger.info("Invalidating cache due to timestamp inconsistency")
                     return []
+
+                # If time_delta is slightly negative (within tolerance), treat as 0
+                if time_delta < 0:
+                    logger.debug(
+                        f"Minor clock skew detected ({-time_delta:.0f}s), within tolerance"
+                    )
+                    time_delta = 0
 
                 data_age_hours = time_delta / 3600
 
