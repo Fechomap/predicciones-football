@@ -41,10 +41,11 @@ class BotService:
         try:
             logger.info("Starting fixture check cycle...")
 
-            # Get upcoming fixtures from API (force refresh to detect changes)
+            # Get upcoming fixtures (monitoring cycle: check freshness)
             fixtures = self.fixtures_service.get_upcoming_fixtures(
                 hours_ahead=Config.ALERT_TIME_MINUTES // 60 + 24,
-                force_refresh=True  # Always refresh in monitoring cycle
+                check_freshness=True  # Only monitoring cycle checks data age
+                # Refreshes from API if data > 3h old (~8 calls/day)
             )
 
             # Filter fixtures that need alerts
@@ -68,7 +69,14 @@ class BotService:
 
     def _filter_fixtures_for_alert(self, fixtures: List[Dict]) -> List[Dict]:
         """
-        Filter fixtures that are within alert window
+        Filter fixtures that need alerts
+
+        IMPROVED LOGIC (per PM recommendation):
+        - Find ALL fixtures starting in <= ALERT_TIME_MINUTES
+        - That have NOT been notified yet
+        - That have NOT started yet
+
+        This ensures NO fixtures are missed due to narrow time windows.
 
         Args:
             fixtures: List of all fixtures
@@ -78,8 +86,7 @@ class BotService:
         """
         # Use timezone-aware UTC datetime for consistency with API
         now = datetime.now(timezone.utc)
-        alert_window_start = now + timedelta(minutes=Config.ALERT_TIME_MINUTES - 10)
-        alert_window_end = now + timedelta(minutes=Config.ALERT_TIME_MINUTES + 10)
+        alert_deadline = now + timedelta(minutes=Config.ALERT_TIME_MINUTES)
 
         filtered = []
 
@@ -90,8 +97,13 @@ class BotService:
             # Convert timestamp to timezone-aware datetime
             kickoff_time = datetime.fromtimestamp(kickoff_timestamp, tz=timezone.utc)
 
-            # Check if in alert window
-            if alert_window_start <= kickoff_time <= alert_window_end:
+            # Calculate time until kickoff
+            time_until_kickoff = (kickoff_time - now).total_seconds() / 60  # minutes
+
+            # Check if fixture is:
+            # 1. Not started yet (kickoff in the future)
+            # 2. Starting within alert window (<=ALERT_TIME_MINUTES from now)
+            if kickoff_time > now and time_until_kickoff <= Config.ALERT_TIME_MINUTES:
                 # Check if already notified
                 with db_manager.get_session() as session:
                     existing_notification = session.query(NotificationLog).join(
@@ -102,7 +114,13 @@ class BotService:
                     ).first()
 
                     if not existing_notification:
+                        logger.debug(
+                            f"Fixture {fixture_id} ready for alert "
+                            f"(starts in {time_until_kickoff:.1f} min)"
+                        )
                         filtered.append(fixture)
+                    else:
+                        logger.debug(f"Fixture {fixture_id} already notified, skipping")
 
         return filtered
 
@@ -246,18 +264,7 @@ class BotService:
                     logger.warning("Daily alert limit reached")
                     return
 
-                # Save to database
-                self._save_analysis(
-                    fixture_id,
-                    probabilities,
-                    expected_home,
-                    expected_away,
-                    outcome,
-                    value_result,
-                    odds
-                )
-
-                # Send notification
+                # Prepare notification data BEFORE any DB operation
                 analysis = {
                     "home_probability": probabilities["home_win"],
                     "draw_probability": probabilities["draw"],
@@ -294,14 +301,35 @@ class BotService:
                     "suggested_stake": round(suggested_stake_pct, 2)  # Kelly Criterion %
                 }
 
+                # CRITICAL: Send notification FIRST, save to DB ONLY if successful
+                logger.info("Sending notification to Telegram...")
                 message_id = await self.telegram.send_value_bet_alert(
                     fixture=fixture,
                     analysis=analysis,
                     value_bet=value_bet_data
                 )
 
+                # Only save to database if notification was successfully sent
                 if message_id:
+                    logger.info(f"✅ Notification sent successfully (message_id: {message_id})")
+
+                    # NOW save to database (notification confirmed)
+                    self._save_analysis(
+                        fixture_id,
+                        probabilities,
+                        expected_home,
+                        expected_away,
+                        outcome,
+                        value_result,
+                        odds,
+                        message_id=message_id  # Save telegram message ID
+                    )
+
                     self.alerts_sent_today += 1
+                    logger.info(f"✅ Analysis saved to database")
+                else:
+                    # Notification failed - DO NOT save to DB, will retry next cycle
+                    logger.error(f"❌ Failed to send notification, will retry in next cycle")
 
                 # Only send one alert per fixture
                 break
@@ -515,9 +543,18 @@ class BotService:
         expected_away: float,
         outcome: str,
         value_result: Dict,
-        odds: float
+        odds: float,
+        message_id: int = None
     ):
-        """Save analysis to database"""
+        """
+        Save analysis to database
+
+        IMPORTANT: Only call this AFTER successfully sending the notification.
+        This ensures we only mark as "sent" if the user actually received it.
+
+        Args:
+            message_id: Telegram message ID (required for notification log)
+        """
         with db_manager.get_session() as session:
             # Create prediction
             prediction = Prediction(
@@ -548,14 +585,16 @@ class BotService:
             session.add(value_bet)
             session.flush()
 
-            # Create notification log
+            # Create notification log (only if notification was sent)
             notification = NotificationLog(
                 value_bet_id=value_bet.id,
-                status="sent"
+                telegram_message_id=message_id,
+                status="sent"  # We know it was sent because message_id exists
             )
             session.add(notification)
 
             session.commit()
+            logger.debug(f"Saved analysis for fixture {fixture_id} with notification status: sent")
 
     async def send_daily_summary(self):
         """Send daily summary"""

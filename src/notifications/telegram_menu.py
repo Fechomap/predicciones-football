@@ -13,6 +13,29 @@ if TYPE_CHECKING:
 logger = setup_logger(__name__)
 
 
+async def safe_edit_message(query, text: str, **kwargs):
+    """
+    Safely edit Telegram message, handling 'Message is not modified' error
+
+    This error occurs when user clicks same button twice (no content change).
+    We handle it gracefully to avoid polluting logs.
+
+    Args:
+        query: CallbackQuery object
+        text: New message text
+        **kwargs: Additional arguments for edit_message_text
+    """
+    try:
+        await query.edit_message_text(text, **kwargs)
+    except Exception as e:
+        if "message is not modified" in str(e).lower():
+            logger.debug("Message content unchanged, skipping edit")
+            await query.answer()  # Just acknowledge the button press
+        else:
+            # Re-raise other errors
+            raise
+
+
 class TelegramMenu:
     """Handles menu navigation with inline keyboards"""
 
@@ -323,7 +346,8 @@ Selecciona la liga que deseas consultar:
 ¿Qué deseas hacer?
 """
 
-        await update.callback_query.edit_message_text(
+        await safe_edit_message(
+            update.callback_query,
             message,
             parse_mode="HTML",
             reply_markup=self.get_fixture_actions_menu(fixture_id)

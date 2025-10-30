@@ -15,6 +15,29 @@ if TYPE_CHECKING:
 logger = setup_logger(__name__)
 
 
+async def safe_edit_message(query, text: str, **kwargs):
+    """
+    Safely edit Telegram message, handling 'Message is not modified' error
+
+    This error occurs when user clicks same button twice (no content change).
+    We handle it gracefully to avoid polluting logs.
+
+    Args:
+        query: CallbackQuery object
+        text: New message text
+        **kwargs: Additional arguments for edit_message_text
+    """
+    try:
+        await query.edit_message_text(text, **kwargs)
+    except Exception as e:
+        if "message is not modified" in str(e).lower():
+            logger.debug("Message content unchanged, skipping edit")
+            await query.answer()  # Just acknowledge the button press
+        else:
+            # Re-raise other errors
+            raise
+
+
 class TelegramHandlers:
     """Handles all callback queries from inline buttons"""
 
@@ -110,7 +133,8 @@ class TelegramHandlers:
         """Handle analyze fixture request"""
         fixture_id = int(callback_data.replace("analyze_", ""))
 
-        await update.callback_query.edit_message_text(
+        await safe_edit_message(
+            update.callback_query,
             "📊 Analizando partido...\n\nEsto puede tomar unos segundos.",
             parse_mode="HTML"
         )
@@ -127,7 +151,8 @@ class TelegramHandlers:
             fixture = next((f for f in fixtures if f.get("fixture", {}).get("id") == fixture_id), None)
 
             if not fixture:
-                await update.callback_query.edit_message_text(
+                await safe_edit_message(
+                    update.callback_query,
                     "❌ Partido no encontrado.",
                     parse_mode="HTML"
                 )
@@ -140,7 +165,8 @@ class TelegramHandlers:
             )
 
             if not analysis:
-                await update.callback_query.edit_message_text(
+                await safe_edit_message(
+                    update.callback_query,
                     "❌ No se pudo analizar el partido. Datos insuficientes.",
                     parse_mode="HTML"
                 )
@@ -150,7 +176,8 @@ class TelegramHandlers:
             message = self._format_analysis(fixture, analysis)
 
             # Send analysis
-            await update.callback_query.edit_message_text(
+            await safe_edit_message(
+                update.callback_query,
                 message,
                 parse_mode="HTML"
             )
@@ -165,7 +192,8 @@ class TelegramHandlers:
 
         except Exception as e:
             logger.error(f"Error analyzing fixture {fixture_id}: {e}")
-            await update.callback_query.edit_message_text(
+            await safe_edit_message(
+                update.callback_query,
                 f"❌ Error al analizar: {str(e)}",
                 parse_mode="HTML"
             )
@@ -174,7 +202,8 @@ class TelegramHandlers:
         """Handle refresh league fixtures (new API call)"""
         league_id = int(callback_data.replace("refresh_league_", ""))
 
-        await update.callback_query.edit_message_text(
+        await safe_edit_message(
+            update.callback_query,
             "🔄 <b>Consultando API...</b>\n\nObteniendo partidos actualizados de todas las ligas.",
             parse_mode="HTML"
         )
