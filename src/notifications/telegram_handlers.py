@@ -7,6 +7,7 @@ from telegram.ext import ContextTypes
 from ..utils.logger import setup_logger
 from ..utils.cache import fixtures_cache
 from .telegram_menu import TelegramMenu
+from .message_formatter import MessageFormatter
 
 if TYPE_CHECKING:
     from ..services import BotService
@@ -221,9 +222,10 @@ class TelegramHandlers:
         our_pred = analysis.get("our_prediction", {})
         api_pred = analysis.get("api_prediction", {})
         stats = analysis.get("statistics", {})
+        goal_ranges = analysis.get("goal_ranges", {})
         value = analysis.get("value_bet")
 
-        # Base message
+        # Base message - ALWAYS show both predictions
         message = f"""
 ⚽ <b>ANÁLISIS DEL PARTIDO</b>
 
@@ -255,9 +257,14 @@ class TelegramHandlers:
 • {home_team}: {stats.get('expected_goals_home', 0):.2f}
 • {away_team}: {stats.get('expected_goals_away', 0):.2f}
 
+🥅 <b>PROBABILIDAD DE GOLES TOTALES</b>
+• 0-1 Goles: {goal_ranges.get('0-1', 0) * 100:.1f}%
+• 2-3 Goles: {goal_ranges.get('2-3', 0) * 100:.1f}%
+• 4+ Goles: {goal_ranges.get('4+', 0) * 100:.1f}%
+
 📈 <b>FORMA RECIENTE</b> (últimos 5 partidos)
-• {home_team}: {stats.get('home_form', 'N/A').replace('W', '✅').replace('D', '🟨').replace('L', '❌')}
-• {away_team}: {stats.get('away_form', 'N/A').replace('W', '✅').replace('D', '🟨').replace('L', '❌')}
+• {home_team}: {MessageFormatter._format_form_string(stats.get('home_form', 'N/A'))}
+• {away_team}: {MessageFormatter._format_form_string(stats.get('away_form', 'N/A'))}
 
 📊 <b>PARTIDOS JUGADOS</b>
 • {home_team} (casa): {stats.get('home_matches', 0)} partidos
@@ -271,6 +278,7 @@ class TelegramHandlers:
 ━━━━━━━━━━━━━━━━━━━━━━
 
 💰 <b>VALUE BET DETECTADO</b>
+<i>(Basado en nuestra predicción Poisson)</i>
 
 • Resultado: {html.escape(str(value.get('outcome', 'N/A')))}
 • Edge: +{value.get('edge', 0)*100:.1f}%

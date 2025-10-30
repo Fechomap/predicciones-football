@@ -66,6 +66,9 @@ class MessageFormatter:
         home_form = analysis.get("home_form", {})
         away_form = analysis.get("away_form", {})
 
+        # Goal ranges analysis
+        goal_ranges = analysis.get("goal_ranges", {})
+
         # Build message
         message = f"""⚽ <b>OPORTUNIDAD DETECTADA</b>
 
@@ -78,15 +81,16 @@ class MessageFormatter:
 ━━━━━━━━━━━━━━━━━━━━━━
 
 📊 <b>ANÁLISIS ESTADÍSTICO</b>
+<i>(La recomendación de valor se basa en nuestra predicción Poisson)</i>
 
 <b>Resultado recomendado:</b> {MessageFormatter._translate_outcome(outcome)} ({outcome})
 
 🎯 <b>Probabilidades:</b>
-• Calculada: {calc_prob:.1f}%
+• Calculada (Poisson): {calc_prob:.1f}%
 • Casa de apuestas: {odds} (prob. implícita: {implied_prob:.1f}%)
 • <b>Value Edge: +{edge:.1f}%</b>
 
-📈 <b>Probabilidades del partido:</b>
+📈 <b>Probabilidades del partido (Poisson):</b>
 • Local: {home_prob:.1f}%
 • Empate: {draw_prob:.1f}%
 • Visitante: {away_prob:.1f}%
@@ -95,9 +99,14 @@ class MessageFormatter:
 • {home_team}: {expected_home_goals:.2f}
 • {away_team}: {expected_away_goals:.2f}
 
+🥅 <b>Probabilidad de Goles Totales:</b>
+• 0-1 Goles: {goal_ranges.get('0-1', 0) * 100:.1f}%
+• 2-3 Goles: {goal_ranges.get('2-3', 0) * 100:.1f}%
+• 4+ Goles: {goal_ranges.get('4+', 0) * 100:.1f}%
+
 🔥 <b>Forma reciente (últimos 5):</b>
-• {home_team}: {home_form.get('form_string', 'N/A')} ({home_form.get('points', 0)} pts)
-• {away_team}: {away_form.get('form_string', 'N/A')} ({away_form.get('points', 0)} pts)
+• {home_team}: {MessageFormatter._format_form_string(home_form.get('form_string', 'N/A'))} ({home_form.get('points', 0)} pts)
+• {away_team}: {MessageFormatter._format_form_string(away_form.get('form_string', 'N/A'))} ({away_form.get('points', 0)} pts)
 
 ━━━━━━━━━━━━━━━━━━━━━━
 
@@ -124,6 +133,24 @@ class MessageFormatter:
             "BTTS": "Ambos anotan"
         }
         return translations.get(outcome, outcome)
+
+    @staticmethod
+    def _format_form_string(form_string: str) -> str:
+        """
+        Convert form string to emoji representation
+
+        Args:
+            form_string: Form string (e.g., "WLDWW" or "N/A")
+
+        Returns:
+            Form string with emojis (e.g., "✅❌🟨✅✅")
+        """
+        if not form_string or form_string == "N/A":
+            return "N/A"
+
+        # Replace W, D, L with emojis
+        emoji_form = form_string.replace('W', '✅').replace('D', '🟨').replace('L', '❌')
+        return emoji_form
 
     @staticmethod
     def format_daily_summary(

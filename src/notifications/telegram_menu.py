@@ -284,10 +284,11 @@ Selecciona la liga que deseas consultar:
         """Show fixture details and actions"""
         import asyncio
 
-        # Get all fixtures
+        # Get all fixtures (uses BD cache)
         fixtures = await asyncio.to_thread(
-            self.bot_service.data_collector.collect_upcoming_fixtures,
-            hours_ahead=168
+            self.bot_service.fixtures_service.get_upcoming_fixtures,
+            hours_ahead=168,
+            force_refresh=False
         )
 
         # Find the specific fixture

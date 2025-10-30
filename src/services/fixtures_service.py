@@ -19,34 +19,109 @@ class FixturesService:
 
     def get_upcoming_fixtures(self, hours_ahead: int = 168, force_refresh: bool = False) -> List[Dict]:
         """
-        Get upcoming fixtures with smart caching
+        Get upcoming fixtures with smart strategy
 
         Strategy:
-        1. Check if we have fresh data in BD (< 1 hour old)
-        2. If yes: return from BD (fast)
-        3. If no or force_refresh: call API and update BD
+        1. If force_refresh: Always call API and update BD
+        2. Otherwise: Return from BD (fast, no API calls)
 
         Args:
             hours_ahead: Hours to look ahead
-            force_refresh: Force API call even if BD has data
+            force_refresh: Force API call to refresh data
 
         Returns:
             List of fixtures
         """
-        # Check if we have recent fixtures in BD
+        # If not forcing refresh, try to get from BD first
         if not force_refresh:
-            db_fixtures = self._get_fixtures_from_db(hours_ahead)
+            db_fixtures = self._get_fixtures_from_db_simple(hours_ahead)
 
             if db_fixtures:
-                logger.info(f"Returning {len(db_fixtures)} fixtures from database (cached)")
+                logger.info(f"📚 Returning {len(db_fixtures)} fixtures from database")
                 return db_fixtures
+            else:
+                logger.info("No fixtures in database, will fetch from API")
 
-        # No fresh data in BD or force_refresh: call API
-        logger.info("Fetching fixtures from API...")
+        # Force refresh or no data in BD: call API
+        logger.info("🌐 Fetching fixtures from API...")
         api_fixtures = self.data_collector.collect_upcoming_fixtures(hours_ahead)
 
-        logger.info(f"Fetched {len(api_fixtures)} fixtures from API and stored in BD")
+        logger.info(f"✅ Fetched {len(api_fixtures)} fixtures from API and stored in BD")
         return api_fixtures
+
+    def _get_fixtures_from_db_simple(self, hours_ahead: int) -> List[Dict]:
+        """
+        Get fixtures from database WITHOUT checking data age
+
+        Simply queries BD for upcoming fixtures within the time window.
+        Fast and efficient for user interactions.
+
+        Args:
+            hours_ahead: Hours to look ahead
+
+        Returns:
+            List of fixtures in API format
+        """
+        try:
+            with db_manager.get_session() as session:
+                now = datetime.now()
+                future_time = now + timedelta(hours=hours_ahead)
+
+                # Get fixtures from BD
+                fixtures = session.query(Fixture).filter(
+                    Fixture.kickoff_time >= now,
+                    Fixture.kickoff_time <= future_time,
+                    Fixture.status == "NS"  # Not Started
+                ).all()
+
+                if not fixtures:
+                    return []
+
+                # Convert to API format
+                api_format_fixtures = []
+
+                for fixture in fixtures:
+                    # Get related data
+                    home_team = session.query(Team).filter_by(id=fixture.home_team_id).first()
+                    away_team = session.query(Team).filter_by(id=fixture.away_team_id).first()
+                    league = session.query(League).filter_by(id=fixture.league_id).first()
+
+                    if not home_team or not away_team or not league:
+                        continue
+
+                    # Build API-compatible dict
+                    api_format_fixtures.append({
+                        "fixture": {
+                            "id": fixture.id,
+                            "date": fixture.kickoff_time.isoformat(),
+                            "timestamp": int(fixture.kickoff_time.timestamp()),
+                            "status": {"short": fixture.status},
+                            "venue": {"name": fixture.venue or ""}
+                        },
+                        "league": {
+                            "id": league.id,
+                            "name": league.name,
+                            "country": league.country
+                        },
+                        "teams": {
+                            "home": {
+                                "id": home_team.id,
+                                "name": home_team.name,
+                                "logo": home_team.logo_url
+                            },
+                            "away": {
+                                "id": away_team.id,
+                                "name": away_team.name,
+                                "logo": away_team.logo_url
+                            }
+                        }
+                    })
+
+                return api_format_fixtures
+
+        except Exception as e:
+            logger.error(f"Error getting fixtures from database: {e}")
+            return []
 
     def _get_fixtures_from_db(self, hours_ahead: int) -> List[Dict]:
         """

@@ -41,9 +41,10 @@ class BotService:
         try:
             logger.info("Starting fixture check cycle...")
 
-            # Collect upcoming fixtures
-            fixtures = self.data_collector.collect_upcoming_fixtures(
-                hours_ahead=Config.ALERT_TIME_MINUTES // 60 + 24
+            # Get upcoming fixtures from API (force refresh to detect changes)
+            fixtures = self.fixtures_service.get_upcoming_fixtures(
+                hours_ahead=Config.ALERT_TIME_MINUTES // 60 + 24,
+                force_refresh=True  # Always refresh in monitoring cycle
             )
 
             # Filter fixtures that need alerts
@@ -148,6 +149,12 @@ class BotService:
 
         # Calculate match probabilities
         probabilities = self.poisson_analyzer.calculate_match_probabilities(
+            expected_home,
+            expected_away
+        )
+
+        # Calculate goal ranges probabilities (0-1, 2-3, 4+)
+        goal_ranges = self.poisson_analyzer.calculate_goal_ranges_probabilities(
             expected_home,
             expected_away
         )
@@ -259,6 +266,7 @@ class BotService:
                     "expected_away_goals": expected_away,
                     "home_form": home_form,
                     "away_form": away_form,
+                    "goal_ranges": goal_ranges,
                     "confidence": self.value_detector.get_confidence_rating(
                         value_result["edge"]
                     )
@@ -617,6 +625,12 @@ class BotService:
                 expected_away
             )
 
+            # Calculate goal ranges probabilities (0-1, 2-3, 4+)
+            goal_ranges = self.poisson_analyzer.calculate_goal_ranges_probabilities(
+                expected_home,
+                expected_away
+            )
+
             # Get odds (try to get real odds, fallback to mock)
             odds_data = self.data_collector.collect_fixture_odds(fixture_id)
             best_odds = self._extract_best_odds(odds_data) if odds_data else {}
@@ -679,7 +693,12 @@ class BotService:
             if api_predictions and isinstance(api_predictions, dict):
                 api_pred = api_predictions.get("predictions", {})
                 api_percent = api_pred.get("percent", {}) if api_pred else {}
-                logger.debug(f"API percent data: {api_percent}")
+                logger.info(f"🔍 API predictions raw data for fixture {fixture_id}:")
+                logger.info(f"   - Full predictions keys: {list(api_predictions.keys())}")
+                logger.info(f"   - api_pred keys: {list(api_pred.keys()) if api_pred else 'None'}")
+                logger.info(f"   - Percent data: {api_percent}")
+                logger.info(f"   - Winner: {api_pred.get('winner', {})}")
+                logger.info(f"   - Advice: {api_pred.get('advice', 'N/A')}")
 
             # Helper function to safely parse percentage values
             def safe_parse_percent(value) -> float:
@@ -696,6 +715,45 @@ class BotService:
                     logger.warning(f"Could not parse percentage value: {value}, error: {e}")
                     return 0.0
 
+            # Helper function to detect generic/unreliable API predictions
+            def is_generic_prediction(home_pct: float, draw_pct: float, away_pct: float) -> bool:
+                """
+                Detect if API predictions are generic/unreliable
+
+                Generic patterns:
+                - 50-50-0 (no data)
+                - 33-33-33 (equal probabilities)
+                - 10-45-45 (common default pattern)
+                - 45-45-10 (common default pattern)
+                - Any pattern that seems like a default
+                """
+                # Pattern 1: 50-50-0 or similar
+                if abs(home_pct - 0.50) < 0.01 and abs(draw_pct - 0.50) < 0.01 and away_pct < 0.01:
+                    return True
+                # Pattern 2: Equal probabilities (33-33-33)
+                if abs(home_pct - 0.33) < 0.02 and abs(draw_pct - 0.33) < 0.02 and abs(away_pct - 0.33) < 0.02:
+                    return True
+                # Pattern 3: 10-45-45 or 45-45-10 (common default for Liga MX)
+                if abs(home_pct - 0.10) < 0.01 and abs(draw_pct - 0.45) < 0.01 and abs(away_pct - 0.45) < 0.01:
+                    return True
+                if abs(home_pct - 0.45) < 0.01 and abs(draw_pct - 0.45) < 0.01 and abs(away_pct - 0.10) < 0.01:
+                    return True
+                # Pattern 4: All zeros
+                if home_pct == 0 and draw_pct == 0 and away_pct == 0:
+                    return True
+                return False
+
+            # Parse API predictions
+            api_home = safe_parse_percent(api_percent.get("home"))
+            api_draw = safe_parse_percent(api_percent.get("draw"))
+            api_away = safe_parse_percent(api_percent.get("away"))
+
+            # Check if predictions are generic/unreliable
+            api_predictions_reliable = not is_generic_prediction(api_home, api_draw, api_away)
+
+            if not api_predictions_reliable:
+                logger.warning(f"⚠️ API predictions appear to be generic/unreliable: {api_home:.1%}, {api_draw:.1%}, {api_away:.1%}")
+
             # Build analysis result with BOTH predictions
             return {
                 "has_value": has_value,
@@ -705,11 +763,12 @@ class BotService:
                     "away": probabilities["away_win"]
                 },
                 "api_prediction": {
-                    "home": safe_parse_percent(api_percent.get("home")),
-                    "draw": safe_parse_percent(api_percent.get("draw")),
-                    "away": safe_parse_percent(api_percent.get("away")),
+                    "home": api_home,
+                    "draw": api_draw,
+                    "away": api_away,
                     "winner": api_pred.get("winner", {}).get("name") if api_pred else None,
-                    "advice": api_pred.get("advice") if api_pred else None
+                    "advice": api_pred.get("advice") if api_pred else None,
+                    "reliable": api_predictions_reliable  # Flag to indicate if predictions are reliable
                 },
                 "statistics": {
                     "expected_goals_home": expected_home,
@@ -719,6 +778,7 @@ class BotService:
                     "home_matches": home_stats.get("home_matches", 0),
                     "away_matches": away_stats.get("away_matches", 0)
                 },
+                "goal_ranges": goal_ranges,
                 "h2h": {
                     "last_5": api_predictions.get("h2h", [])[:5] if "h2h" in api_predictions else []
                 },

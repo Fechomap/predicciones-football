@@ -92,10 +92,11 @@ Usa /partidos para ver partidos próximos.
         await update.message.reply_text("🔍 Buscando partidos de la semana (Lunes-Domingo)...")
 
         try:
-            # Collect upcoming fixtures (7 days = 168 hours)
+            # Get upcoming fixtures (7 days = 168 hours) - uses BD cache
             fixtures = await asyncio.to_thread(
-                self.bot_service.data_collector.collect_upcoming_fixtures,
-                hours_ahead=168
+                self.bot_service.fixtures_service.get_upcoming_fixtures,
+                hours_ahead=168,
+                force_refresh=False
             )
 
             if not fixtures:
@@ -164,10 +165,11 @@ Usa /ligas para ver qué ligas estamos monitoreando.
         await update.message.reply_text("🔍 Analizando partidos de la semana con value bets...")
 
         try:
-            # Get upcoming fixtures (7 days = 168 hours)
+            # Get upcoming fixtures (7 days = 168 hours) - uses BD cache
             fixtures = await asyncio.to_thread(
-                self.bot_service.data_collector.collect_upcoming_fixtures,
-                hours_ahead=168
+                self.bot_service.fixtures_service.get_upcoming_fixtures,
+                hours_ahead=168,
+                force_refresh=False
             )
 
             if not fixtures:

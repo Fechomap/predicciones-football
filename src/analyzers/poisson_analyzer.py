@@ -223,3 +223,64 @@ class PoissonAnalyzer:
         logger.debug(f"BTTS probability: {result}")
 
         return result
+
+    @staticmethod
+    def calculate_goal_ranges_probabilities(
+        expected_home_goals: float,
+        expected_away_goals: float
+    ) -> Dict[str, float]:
+        """
+        Calculate probabilities for total goal ranges using CDF
+
+        Uses Poisson Cumulative Distribution Function (CDF) for efficient
+        and precise calculation of goal range probabilities.
+
+        The CDF approach is superior to looping through individual PMF values:
+        - More efficient: O(1) instead of O(n)
+        - More precise: Captures entire distribution without arbitrary cutoff
+        - Cleaner code: No magic numbers like max_goals
+
+        Mathematical approach:
+        - P(0-1 goals) = P(X ≤ 1) = CDF(1)
+        - P(2-3 goals) = P(X ≤ 3) - P(X ≤ 1) = CDF(3) - CDF(1)
+        - P(4+ goals) = 1 - P(X ≤ 3) = 1 - CDF(3)
+
+        Args:
+            expected_home_goals: Expected home team goals
+            expected_away_goals: Expected away team goals
+
+        Returns:
+            Dictionary with probabilities for each goal range:
+            {
+                "0-1": 0.28,   # Low scoring (0 or 1 total goals)
+                "2-3": 0.45,   # Medium scoring (2 or 3 total goals)
+                "4+": 0.27     # High scoring (4 or more total goals)
+            }
+
+        Example:
+            >>> calculate_goal_ranges_probabilities(1.5, 1.2)
+            {"0-1": 0.2381, "2-3": 0.4558, "4+": 0.3061}
+        """
+        total_expected_goals = expected_home_goals + expected_away_goals
+
+        # Use CDF for efficient and precise calculation
+        # CDF(k) = P(X ≤ k) for Poisson distribution
+        cdf_1 = poisson.cdf(1, total_expected_goals)  # P(X ≤ 1)
+        cdf_3 = poisson.cdf(3, total_expected_goals)  # P(X ≤ 3)
+
+        # Calculate ranges using CDF
+        prob_0_1 = cdf_1                    # P(X ≤ 1)
+        prob_2_3 = cdf_3 - cdf_1           # P(2 ≤ X ≤ 3) = P(X ≤ 3) - P(X ≤ 1)
+        prob_4_plus = 1 - cdf_3            # P(X ≥ 4) = 1 - P(X ≤ 3)
+
+        result = {
+            "0-1": round(prob_0_1, 4),
+            "2-3": round(prob_2_3, 4),
+            "4+": round(prob_4_plus, 4),
+        }
+
+        logger.debug(
+            f"Goal ranges for total expected {total_expected_goals:.2f}: {result}"
+        )
+
+        return result

@@ -1,7 +1,7 @@
 """Configuration management with Pydantic validation"""
-from pydantic import Field, field_validator, ConfigDict
+from pydantic import Field, field_validator, model_validator, ConfigDict
 from pydantic_settings import BaseSettings
-from typing import List
+from typing import List, Self
 
 
 class Config(BaseSettings):
@@ -25,8 +25,13 @@ class Config(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = Field(..., description="Telegram bot token")
     TELEGRAM_CHAT_ID: str = Field(..., description="Telegram chat ID")
 
-    # Database
-    DATABASE_URL: str = Field(..., description="Database connection URL")
+    # Environment
+    ENVIRONMENT: str = Field(default="development", description="Environment: development or production")
+
+    # Database URLs
+    DATABASE_URL_LOCAL: str = Field(default="postgresql://localhost:5432/football_betting", description="Local database URL")
+    DATABASE_URL_PRODUCTION: str = Field(default="", description="Production database URL (Railway)")
+    DATABASE_URL: str = Field(default="", description="Active database URL (auto-configured)")
 
     # Bot Configuration
     ALERT_TIME_MINUTES: int = Field(default=60, ge=1, le=1440, description="Alert time before match")
@@ -47,12 +52,32 @@ class Config(BaseSettings):
     # Leagues
     ENABLED_LEAGUES: str = Field(default="262", description="Comma-separated league IDs")
 
-    # Railway
-    RAILWAY_ENVIRONMENT: str = Field(default="development", description="Railway environment")
+    # Server
     PORT: int = Field(default=8000, ge=1, le=65535, description="Server port")
 
     # Logging
     LOG_LEVEL: str = Field(default="INFO", description="Logging level")
+
+    @model_validator(mode='after')
+    def configure_database_url(self) -> Self:
+        """Auto-configure DATABASE_URL based on ENVIRONMENT"""
+        # If DATABASE_URL is already set (e.g., by Railway), use it
+        if self.DATABASE_URL:
+            print(f"🔧 Using pre-configured DATABASE_URL")
+            return self
+
+        # Otherwise, auto-configure based on ENVIRONMENT
+        if self.ENVIRONMENT.lower() == "production":
+            if self.DATABASE_URL_PRODUCTION:
+                self.DATABASE_URL = self.DATABASE_URL_PRODUCTION
+                print(f"🚀 Using PRODUCTION database (Railway)")
+            else:
+                raise ValueError("DATABASE_URL_PRODUCTION not configured for production environment")
+        else:
+            self.DATABASE_URL = self.DATABASE_URL_LOCAL
+            print(f"💻 Using LOCAL database (development)")
+
+        return self
 
     @field_validator("ENABLED_LEAGUES")
     @classmethod
