@@ -514,24 +514,67 @@ class BotService:
         """
         Extract best available odds from odds data
 
+        API Response structure:
+        [
+          {
+            "league": {...},
+            "fixture": {...},
+            "bookmakers": [  ← Array of bookmakers
+              {
+                "name": "Bet365",
+                "bets": [
+                  {
+                    "name": "Match Winner",
+                    "values": [
+                      {"value": "Home", "odd": "1.33"},
+                      {"value": "Draw", "odd": "5.25"},
+                      {"value": "Away", "odd": "8.50"}
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+
         Args:
             odds_data: Odds data from API
 
         Returns:
-            Dictionary with best odds for each outcome
+            Dictionary with best odds for each outcome (Home, Draw, Away)
         """
         best_odds = {}
 
-        for bookmaker_data in odds_data:
-            for bet in bookmaker_data.get("bets", []):
-                if bet.get("name") == "Match Winner":
-                    for value in bet.get("values", []):
-                        outcome = value.get("value")
-                        odds = float(value.get("odd", 0))
+        # Iterate through response (usually single item)
+        for odds_item in odds_data:
+            # Access bookmakers array (CRITICAL FIX)
+            bookmakers = odds_item.get("bookmakers", [])
 
-                        # Keep best (highest) odds
-                        if outcome not in best_odds or odds > best_odds[outcome]:
-                            best_odds[outcome] = odds
+            for bookmaker in bookmakers:
+                bookmaker_name = bookmaker.get("name", "Unknown")
+
+                for bet in bookmaker.get("bets", []):
+                    if bet.get("name") == "Match Winner":
+                        for value in bet.get("values", []):
+                            outcome = value.get("value")
+                            odd_str = value.get("odd", "0")
+
+                            # Convert string to float (API returns strings)
+                            try:
+                                odds = float(odd_str)
+                            except (ValueError, TypeError):
+                                logger.warning(f"Invalid odd value: {odd_str} from {bookmaker_name}")
+                                continue
+
+                            # Keep best (highest) odds for better value
+                            if outcome not in best_odds or odds > best_odds[outcome]:
+                                best_odds[outcome] = odds
+                                logger.debug(f"Best odd for {outcome}: {odds} ({bookmaker_name})")
+
+        if best_odds:
+            logger.info(f"✅ Extracted best odds: {best_odds}")
+        else:
+            logger.warning("⚠️ No valid odds extracted from API response")
 
         return best_odds
 
@@ -670,60 +713,75 @@ class BotService:
                 expected_away
             )
 
-            # Get odds (try to get real odds, fallback to mock)
+            # Get odds (MUST have real odds - no mocks in production)
+            logger.info(f"📊 Fetching odds for fixture {fixture_id}")
             odds_data = self.data_collector.collect_fixture_odds(fixture_id)
-            best_odds = self._extract_best_odds(odds_data) if odds_data else {}
 
-            # If no real odds, use mock odds for demo
+            logger.info(f"📊 Odds data received: {type(odds_data)}, length: {len(odds_data) if odds_data else 0}")
+
+            if odds_data:
+                best_odds = self._extract_best_odds(odds_data)
+            else:
+                best_odds = {}
+                logger.warning(f"⚠️ collect_fixture_odds returned None/empty for fixture {fixture_id}")
+
+            # CRITICAL: If no real odds, continue analysis but WITHOUT value bet detection
+            # Show Poisson predictions and stats, but mark that value bet is unavailable
             if not best_odds:
-                best_odds = {
-                    "Home": 1.85,
-                    "Draw": 3.40,
-                    "Away": 4.20
-                }
+                logger.warning(
+                    f"⚠️ No market odds found for fixture {fixture_id}. "
+                    f"Will show statistical analysis but NO value bet detection."
+                )
+                # Set flag that odds are unavailable
+                odds_unavailable = True
+            else:
+                odds_unavailable = False
 
-            # Check for value bets
+            # Check for value bets (ONLY if we have real odds)
             has_value = False
             best_value = None
             best_edge = 0
 
-            outcomes = [
-                ("Local (1)", probabilities["home_win"], best_odds.get("Home")),
-                ("Empate (X)", probabilities["draw"], best_odds.get("Draw")),
-                ("Visitante (2)", probabilities["away_win"], best_odds.get("Away"))
-            ]
+            if not odds_unavailable:
+                outcomes = [
+                    ("Local (1)", probabilities["home_win"], best_odds.get("Home")),
+                    ("Empate (X)", probabilities["draw"], best_odds.get("Draw")),
+                    ("Visitante (2)", probabilities["away_win"], best_odds.get("Away"))
+                ]
 
-            for outcome, probability, odds in outcomes:
-                if not odds:
-                    continue
+                for outcome, probability, odds in outcomes:
+                    if not odds:
+                        continue
 
-                value_result = self.value_detector.detect_value_bet(
-                    calculated_probability=probability,
-                    bookmaker_odds=odds
-                )
-
-                if value_result["is_value_bet"] and value_result["edge"] > best_edge:
-                    has_value = True
-                    best_edge = value_result["edge"]
-
-                    # Calculate optimal stake using Kelly Criterion
-                    kelly_stake = self.value_detector.calculate_kelly_stake(
+                    value_result = self.value_detector.detect_value_bet(
                         calculated_probability=probability,
-                        bookmaker_odds=odds,
-                        bankroll=Config.BANKROLL,
-                        kelly_fraction=Config.KELLY_FRACTION,
-                        max_stake_pct=Config.MAX_STAKE_PERCENTAGE
+                        bookmaker_odds=odds
                     )
 
-                    # Convert to decimal (0.03 = 3%)
-                    suggested_stake_decimal = kelly_stake / Config.BANKROLL
+                    if value_result["is_value_bet"] and value_result["edge"] > best_edge:
+                        has_value = True
+                        best_edge = value_result["edge"]
 
-                    best_value = {
-                        "outcome": outcome,
-                        "edge": value_result["edge"],
-                        "confidence": self.value_detector.get_confidence_rating(value_result["edge"]),
-                        "suggested_stake": round(suggested_stake_decimal, 4)  # Kelly Criterion as decimal
-                    }
+                        # Calculate optimal stake using Kelly Criterion
+                        kelly_stake = self.value_detector.calculate_kelly_stake(
+                            calculated_probability=probability,
+                            bookmaker_odds=odds,
+                            bankroll=Config.BANKROLL,
+                            kelly_fraction=Config.KELLY_FRACTION,
+                            max_stake_pct=Config.MAX_STAKE_PERCENTAGE
+                        )
+
+                        # Convert to decimal (0.03 = 3%)
+                        suggested_stake_decimal = kelly_stake / Config.BANKROLL
+
+                        best_value = {
+                            "outcome": outcome,
+                            "edge": value_result["edge"],
+                            "confidence": self.value_detector.get_confidence_rating(value_result["edge"]),
+                            "suggested_stake": round(suggested_stake_decimal, 4)  # Kelly Criterion as decimal
+                        }
+            else:
+                logger.info("⚠️ Skipping value bet detection (no market odds available)")
 
             # Extract API predictions (handle empty or missing data)
             api_pred = {}
@@ -796,6 +854,7 @@ class BotService:
             # Build analysis result with BOTH predictions
             return {
                 "has_value": has_value,
+                "odds_unavailable": odds_unavailable,  # Flag if market odds not available
                 "our_prediction": {
                     "home": probabilities["home_win"],
                     "draw": probabilities["draw"],

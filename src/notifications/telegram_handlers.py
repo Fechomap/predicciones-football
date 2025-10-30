@@ -167,7 +167,12 @@ class TelegramHandlers:
             if not analysis:
                 await safe_edit_message(
                     update.callback_query,
-                    "❌ No se pudo analizar el partido. Datos insuficientes.",
+                    "❌ No se pudo analizar el partido.\n\n"
+                    "<i>Posibles causas:</i>\n"
+                    "• No hay estadísticas disponibles para los equipos\n"
+                    "• Error temporal en la API\n"
+                    "• El partido fue cancelado o pospuesto\n\n"
+                    "Por favor, intenta más tarde o usa el botón 🔄 Refrescar.",
                     parse_mode="HTML"
                 )
                 return
@@ -301,7 +306,24 @@ class TelegramHandlers:
 """
 
         # Add value bet section if detected
-        if analysis.get("has_value") and value:
+        if analysis.get("odds_unavailable"):
+            # No odds available - show warning
+            message += """
+━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️ <b>CUOTAS NO DISPONIBLES</b>
+
+No se pudieron obtener cuotas de mercado para este partido.
+
+<i>Posibles razones:</i>
+• El partido está muy lejos en el futuro
+• Las casas de apuestas aún no publicaron cuotas
+• Error temporal en la API
+
+El análisis estadístico (arriba) sigue siendo válido.
+Intenta de nuevo más cerca del partido.
+"""
+        elif analysis.get("has_value") and value:
             confidence_stars = "⭐" * min(value.get('confidence', 3), 5)
             message += f"""
 ━━━━━━━━━━━━━━━━━━━━━━
