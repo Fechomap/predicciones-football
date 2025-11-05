@@ -54,6 +54,7 @@ Guía completa para desarrolladores del Football Betting Analytics Bot.
 - **[LIVE_PREDICTIONS_SUMMARY.md](LIVE_PREDICTIONS_SUMMARY.md)** - ⚡ Resumen ejecutivo: Predicciones en tiempo real
 - **[LIVE_PREDICTIONS_RESEARCH.md](LIVE_PREDICTIONS_RESEARCH.md)** - 🔬 Investigación completa: Sistema de predicciones en vivo
 - **[LIVE_PREDICTIONS_CODE_EXAMPLES.md](LIVE_PREDICTIONS_CODE_EXAMPLES.md)** - 💻 Ejemplos de código para implementación
+- **[FOOTYSTATS_INTEGRATION_GUIDE.md](FOOTYSTATS_INTEGRATION_GUIDE.md)** - 🎯 Guía completa: Integración de FootyStats API (Córners)
 - **[ALERT_SYSTEM_FIX.md](ALERT_SYSTEM_FIX.md)** - 🚨 Fix del sistema de alertas
 
 ## 🔍 Buscar por Tema
@@ -89,7 +90,7 @@ Si encuentras información faltante o incorrecta:
 
 ## 🆕 Nuevas Investigaciones
 
-### Predicciones en Tiempo Real (Live Predictions)
+### 🔴 Predicciones en Tiempo Real (Live Predictions)
 
 **Orden de lectura recomendado**:
 
@@ -114,7 +115,35 @@ Si encuentras información faltante o incorrecta:
 
 ---
 
+### 🎯 Integración FootyStats API (Córners y Estadísticas)
+
+**Documento principal**:
+
+**[FOOTYSTATS_INTEGRATION_GUIDE.md](FOOTYSTATS_INTEGRATION_GUIDE.md)** 🎯
+- Guía completa de integración (1000+ líneas)
+- Análisis comparativo con API-Football
+- Arquitectura de integración complementaria
+- Plan de implementación en 6 fases
+- Ejemplos de código completos
+- Modelos de base de datos
+- Testing strategy
+- Análisis de costos (£29.99/mes - Plan Hobby)
+
+**Incluye**:
+- ✅ Análisis de endpoints de córners
+- ✅ CornerAnalyzer con distribución Poisson
+- ✅ Detección de value bets en córners
+- ✅ Sistema de cache y rate limiting
+- ✅ Migración de base de datos
+- ✅ Comandos Telegram (/corners_stats, /corner_trends)
+- ✅ Métricas y monitoreo
+- ✅ Checklist de implementación
+
+**Estado**: 🟢 Listo para implementación
+
+---
+
 ## 🔄 Última Actualización
 
 **Fecha**: Noviembre 2025
-**Versión**: 1.1.0
+**Versión**: 1.2.0
