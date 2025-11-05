@@ -50,6 +50,12 @@ Guía completa para desarrolladores del Football Betting Analytics Bot.
 - **TESTING.md** - Guía de testing
 - **TROUBLESHOOTING.md** - Solución de problemas
 
+### Investigación y Nuevas Features
+- **[LIVE_PREDICTIONS_SUMMARY.md](LIVE_PREDICTIONS_SUMMARY.md)** - ⚡ Resumen ejecutivo: Predicciones en tiempo real
+- **[LIVE_PREDICTIONS_RESEARCH.md](LIVE_PREDICTIONS_RESEARCH.md)** - 🔬 Investigación completa: Sistema de predicciones en vivo
+- **[LIVE_PREDICTIONS_CODE_EXAMPLES.md](LIVE_PREDICTIONS_CODE_EXAMPLES.md)** - 💻 Ejemplos de código para implementación
+- **[ALERT_SYSTEM_FIX.md](ALERT_SYSTEM_FIX.md)** - 🚨 Fix del sistema de alertas
+
 ## 🔍 Buscar por Tema
 
 ### Configuración
@@ -81,7 +87,34 @@ Si encuentras información faltante o incorrecta:
 2. O mejor, crea un PR con la corrección
 3. Mantén el mismo formato y estructura
 
+## 🆕 Nuevas Investigaciones
+
+### Predicciones en Tiempo Real (Live Predictions)
+
+**Orden de lectura recomendado**:
+
+1. **[LIVE_PREDICTIONS_SUMMARY.md](LIVE_PREDICTIONS_SUMMARY.md)** ⚡
+   - Resumen ejecutivo (5 min lectura)
+   - Viabilidad técnica y económica
+   - Decisión: GO/NO GO
+
+2. **[LIVE_PREDICTIONS_RESEARCH.md](LIVE_PREDICTIONS_RESEARCH.md)** 🔬
+   - Investigación completa (20 min lectura)
+   - Arquitectura propuesta
+   - Plan de implementación por fases
+   - Análisis de riesgos y costos
+
+3. **[LIVE_PREDICTIONS_CODE_EXAMPLES.md](LIVE_PREDICTIONS_CODE_EXAMPLES.md)** 💻
+   - Ejemplos de código concretos
+   - Modelos de base de datos
+   - Servicios y handlers
+   - Listo para copiar y usar
+
+**Estado**: 🟢 Listo para implementación
+
+---
+
 ## 🔄 Última Actualización
 
-**Fecha**: Octubre 2025
-**Versión**: 1.0.0
+**Fecha**: Noviembre 2025
+**Versión**: 1.1.0
