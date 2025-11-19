@@ -1,0 +1,19 @@
+# Development dependencies - Code quality tools
+# Install with: pip install -r requirements-dev.txt
+
+# Code formatter (like Prettier)
+black>=23.0.0
+
+# Linter (like ESLint)
+flake8>=6.0.0
+flake8-bugbear>=23.0.0  # Additional bug detection
+
+# Type checker (like TypeScript)
+mypy>=1.0.0
+
+# Testing (optional, for future)
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
+# Import sorting (optional)
+isort>=5.12.0

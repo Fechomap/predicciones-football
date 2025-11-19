@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -m py_compile:*)",
+      "Bash(python3:*)",
+      "Bash(./validate.sh:*)",
+      "Bash(bash validate.sh:*)"
+    ],
+    "deny": [],
+    "ask": []
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./validate.sh",
+            "statusMessage": "Validating code quality..."
+          }
+        ]
+      }
+    ]
+  }
+}

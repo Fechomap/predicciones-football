@@ -29,7 +29,7 @@ cp .env.example .env
 nano .env
 
 # 5. Inicializar base de datos
-python3 test_db.py
+python3 scripts/test_db.py
 
 # 6. Ejecutar bot
 ./start.sh
@@ -347,7 +347,7 @@ pip freeze > requirements.txt
 pg_isready
 
 # Probar conexión
-python3 test_db.py
+python3 scripts/test_db.py
 ```
 
 ### Rate Limit Excedido

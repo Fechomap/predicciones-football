@@ -25,10 +25,10 @@ DATABASE_URL_PRODUCTION=postgresql://postgres:password@host:port/railway
 
 ```bash
 # Cambiar a desarrollo (local)
-./switch_env.sh dev
+./scripts/switch_env.sh dev
 
 # Cambiar a producción (Railway)
-./switch_env.sh prod
+./scripts/switch_env.sh prod
 ```
 
 ### Opción 2: Manual
@@ -42,7 +42,7 @@ ENVIRONMENT=development  # o production
 
 ```bash
 # Probar conexión actual
-python3 test_db.py
+python3 scripts/test_db.py
 ```
 
 Muestra:
@@ -56,7 +56,7 @@ Muestra:
 
 ```bash
 # Crear tablas en Railway
-python3 migrate_to_production.py
+python3 scripts/migrate_to_production.py
 ```
 
 Este script:
@@ -81,10 +81,10 @@ Este script:
 
 ```bash
 # 1. Cambiar a desarrollo
-./switch_env.sh dev
+./scripts/switch_env.sh dev
 
 # 2. Probar conexión
-python3 test_db.py
+python3 scripts/test_db.py
 
 # 3. Iniciar bot
 ./start.sh
@@ -94,13 +94,13 @@ python3 test_db.py
 
 ```bash
 # 1. Cambiar a producción
-./switch_env.sh prod
+./scripts/switch_env.sh prod
 
 # 2. Verificar conexión
-python3 test_db.py
+python3 scripts/test_db.py
 
 # 3. Si es primera vez, crear tablas
-python3 migrate_to_production.py
+python3 scripts/migrate_to_production.py
 
 # 4. Iniciar bot
 ./start.sh
@@ -141,21 +141,21 @@ python3 migrate_to_production.py
 grep DATABASE_URL_PRODUCTION .env
 
 # Probar conexión
-./switch_env.sh prod
-python3 test_db.py
+./scripts/switch_env.sh prod
+python3 scripts/test_db.py
 ```
 
 ### Tablas no existen
 ```bash
 # Recrear tablas
-python3 migrate_to_production.py
+python3 scripts/migrate_to_production.py
 ```
 
 ## 📝 Scripts Disponibles
 
-- `switch_env.sh` - Cambiar entorno
-- `test_db.py` - Probar conexión
-- `migrate_to_production.py` - Migrar a Railway
+- `scripts/switch_env.sh` - Cambiar entorno
+- `scripts/test_db.py` - Probar conexión
+- `scripts/migrate_to_production.py` - Migrar a Railway
 - `verify_schema.py` - Ver esquema de tablas
 - `start.sh` - Iniciar bot
 

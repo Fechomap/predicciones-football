@@ -138,7 +138,7 @@ src/api/footystats_client.py           - Cliente con get_league_teams()
 src/services/team_mapping_service.py   - Búsqueda dirigida implementada ✅
 src/analyzers/enhanced_analyzer.py     - Análisis FootyStats
 scripts/init_league_mappings.py        - Inicializar mapeos de ligas ✅
-scripts/init_team_mappings.py          - Inicializar mapeos de equipos
+scripts/auto_map_all_teams.py          - Mapeo automático de equipos ✅
 CAMBIOS_COMMIT.md                      - Documentación del commit
 ```
 
@@ -175,8 +175,8 @@ CAMBIOS_COMMIT.md                      - Documentación del commit
 # 1. Inicializar mapeos de ligas
 python3 scripts/init_league_mappings.py
 
-# 2. (Opcional) Inicializar mapeos manuales de equipos
-python3 scripts/init_team_mappings.py
+# 2. Mapear equipos automáticamente (recomendado)
+python3 scripts/auto_map_all_teams.py --league 39 --save
 
 # 3. Iniciar bot
 ./start.sh

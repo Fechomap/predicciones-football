@@ -5,6 +5,7 @@ requests>=2.31.0
 # Database
 psycopg2-binary>=2.9.9
 SQLAlchemy>=2.0.23
+alembic>=1.17.0  # Database migrations
 
 # Data Analysis (updated for Python 3.14 compatibility)
 pandas>=2.2.0

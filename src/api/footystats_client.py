@@ -152,6 +152,9 @@ class FootyStatsClient:
             response = self._make_request('team', params)
 
             data = response.get('data', {})
+            # API sometimes returns list, handle both cases
+            if isinstance(data, list) and len(data) > 0:
+                return data[0]
             return data if data else None
 
         except Exception as e:
@@ -215,79 +218,6 @@ class FootyStatsClient:
 
         except Exception as e:
             logger.error(f"Failed to fetch H2H: {e}")
-            return []
-
-    def get_team_stats(
-        self,
-        team_id: int
-    ) -> Optional[Dict]:
-        """
-        Get team statistics and info
-
-        Args:
-            team_id: FootyStats team ID
-
-        Returns:
-            Team statistics data or None
-        """
-        params = {'team_id': team_id}
-
-        try:
-            logger.debug(f"Fetching stats for team {team_id}")
-            response = self._make_request('team', params)
-
-            data = response.get('data', [])
-            # API returns list, get first element
-            if isinstance(data, list) and len(data) > 0:
-                return data[0]
-            return None
-
-        except Exception as e:
-            logger.error(f"Failed to fetch team stats: {e}")
-            return None
-
-    def get_league_matches_for_team(
-        self,
-        league_id: int,
-        team_id: int,
-        limit: int = 10
-    ) -> List[Dict]:
-        """
-        Get recent matches for a team from league matches
-
-        Args:
-            league_id: FootyStats league ID
-            team_id: FootyStats team ID
-            limit: Number of recent matches to fetch
-
-        Returns:
-            List of recent matches
-        """
-        try:
-            logger.debug(f"Fetching league matches to find team {team_id} matches")
-
-            # Get all league matches
-            all_matches = self.get_league_matches(league_id)
-
-            # Filter matches where team participated
-            team_matches = [
-                m for m in all_matches
-                if m.get('homeID') == team_id or m.get('awayID') == team_id
-            ]
-
-            # Sort by date (most recent first) and limit
-            team_matches = sorted(
-                team_matches,
-                key=lambda x: x.get('date_unix', 0),
-                reverse=True
-            )[:limit]
-
-            logger.debug(f"Found {len(team_matches)} matches for team {team_id}")
-
-            return team_matches
-
-        except Exception as e:
-            logger.error(f"Failed to fetch team matches: {e}")
             return []
 
     def get_team_recent_matches(

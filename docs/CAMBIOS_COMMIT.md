@@ -71,17 +71,24 @@
 
 ---
 
-### 4. `scripts/init_team_mappings.py` (114 líneas)
-**Propósito**: Script de inicialización de mappings manuales
+### 4. `scripts/auto_map_all_teams.py` (Recomendado)
+**Propósito**: Mapeo automático de equipos con fuzzy matching
 
 **Uso**:
 ```bash
-python3 scripts/init_team_mappings.py
+# Dry-run primero (revisar matches)
+python3 scripts/auto_map_all_teams.py --league 39
+
+# Guardar después de revisar
+python3 scripts/auto_map_all_teams.py --league 39 --save
 ```
 
-**Equipos pre-mapeados**: 22 equipos top (Premier, La Liga, etc.)
+**Ventajas**:
+- IDs reales obtenidos de FootyStats API
+- Fuzzy matching automático
+- Confidence score calculado
 
-**Nota**: Bournemouth (35→148) y West Ham (48→153) ya están verificados
+**Nota**: Superior a mapeos manuales hardcoded
 
 ---
 

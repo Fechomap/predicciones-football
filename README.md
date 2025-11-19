@@ -42,7 +42,7 @@ nano .env
 
 ```bash
 # Para desarrollo local (PostgreSQL)
-python3 test_db.py
+python3 scripts/test_db.py
 ```
 
 ### 4. Ejecutar Bot
@@ -66,10 +66,10 @@ python3 test_db.py
 | Script | Descripción |
 |--------|-------------|
 | `./start.sh` | Iniciar el bot |
-| `./switch_env.sh dev` | Cambiar a desarrollo |
-| `./switch_env.sh prod` | Cambiar a producción |
-| `python3 test_db.py` | Probar conexión BD |
-| `python3 migrate_to_production.py` | Migrar tablas a Railway |
+| `./scripts/switch_env.sh dev` | Cambiar a desarrollo |
+| `./scripts/switch_env.sh prod` | Cambiar a producción |
+| `python3 scripts/test_db.py` | Probar conexión BD |
+| `python3 scripts/migrate_to_production.py` | Migrar tablas a Railway |
 
 ## 🏗️ Estructura del Proyecto
 
