@@ -169,10 +169,12 @@ class TelegramHandlers:
                 )
                 return
 
-            # Perform analysis
+            # Perform analysis (with cache)
+            # NUEVO: Usa AnalysisService con cache inteligente
             analysis = await asyncio.to_thread(
-                self.bot_service.analyze_fixture,
-                fixture
+                self.bot_service.analysis_service.get_or_create_analysis,
+                fixture,
+                force_refresh=False  # Usa cache si disponible
             )
 
             if not analysis:
@@ -285,8 +287,38 @@ class TelegramHandlers:
             force_refresh=True  # This forces new API call
         )
 
-        # Re-analyze with fresh data
-        await self._handle_analyze_fixture(update, context, f"analyze_{fixture_id}")
+        # Re-analyze with fresh data (FORCE REFRESH)
+        # Get fixture
+        fixtures = await asyncio.to_thread(
+            self.bot_service.fixtures_service.get_upcoming_fixtures,
+            hours_ahead=360,
+            force_refresh=False
+        )
+
+        fixture = next((f for f in fixtures if f.get("fixture", {}).get("id") == fixture_id), None)
+
+        if not fixture:
+            await update.callback_query.edit_message_text("❌ Partido no encontrado")
+            return
+
+        # Analyze with FORCE REFRESH (ignora cache, llama API)
+        analysis = await asyncio.to_thread(
+            self.bot_service.analysis_service.get_or_create_analysis,
+            fixture,
+            force_refresh=True  # IMPORTANTE: Fuerza llamadas API
+        )
+
+        if not analysis:
+            await update.callback_query.edit_message_text("❌ Error en el análisis")
+            return
+
+        # Format and send
+        message = self._format_analysis(fixture, analysis)
+        await safe_edit_message(update.callback_query, message, parse_mode="HTML")
+        await update.callback_query.message.reply_text(
+            "✅ Análisis actualizado con datos frescos de la API",
+            reply_markup=self.menu.get_fixture_actions_menu(fixture_id)
+        )
 
     def _format_analysis(self, fixture: dict, analysis: dict) -> str:
         """Format analysis results into a message"""

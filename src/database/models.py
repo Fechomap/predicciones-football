@@ -281,6 +281,9 @@ class AnalysisHistory(Base):
     recommended_bet = Column(String(50))
     edge = Column(Numeric(5, 2))
 
+    # Full analysis data (JSON for complete caching)
+    analysis_data = Column(Text)  # JSON serialized complete analysis
+
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

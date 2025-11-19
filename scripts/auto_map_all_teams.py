@@ -26,13 +26,13 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# League mappings (API-Football → FootyStats)
+# League mappings (API-Football → FootyStats) - TEMPORADA 2024-2025
 LEAGUE_MAPPINGS = {
-    39: 1625,    # Premier League
-    140: 1869,   # La Liga
-    78: 1845,    # Bundesliga
-    135: 1729,   # Serie A
-    262: 2037,   # Liga MX
+    39: 12325,   # Premier League 2024-2025 (era 1625 - 2018-2019)
+    140: 12316,  # La Liga 2024-2025 (era 1869)
+    78: 12529,   # Bundesliga 2024-2025 (era 1845)
+    135: 12530,  # Serie A 2024-2025 (era 1729)
+    262: 12136,  # Liga MX 2024-2025 (era 2037)
 }
 
 
@@ -177,34 +177,60 @@ def analyze_league_mappings(league_id: int, dry_run: bool = True):
 
 
 def save_mappings(mappings: list):
-    """Save mappings to database"""
+    """
+    Save mappings to database (SOLO confianza ≥95%)
+
+    CAMBIO CRÍTICO:
+    - Solo guarda mapeos con confidence_score >= 0.95
+    - Mapeos <95% se ignoran (evita contaminar BD)
+    """
+    SAVE_THRESHOLD = 0.95  # Solo guardar alta confianza
+
+    saved_count = 0
+    skipped_count = 0
+
     with db_manager.get_session() as session:
         for mapping in mappings:
+            # CRÍTICO: Solo guardar si confianza >= 95%
+            if mapping['confidence'] < SAVE_THRESHOLD:
+                logger.debug(
+                    f"⚠️  Skipping {mapping['api_name']} (confidence: {mapping['confidence']:.1%} < {SAVE_THRESHOLD:.0%})"
+                )
+                skipped_count += 1
+                continue
+
             # Check if mapping exists
             existing = session.query(TeamIDMapping).filter_by(
                 api_football_id=mapping['api_id']
             ).first()
 
             if existing:
-                # Update existing
+                # Update existing (solo si nueva confianza es alta)
                 existing.footystats_id = mapping['fs_id']
                 existing.team_name = mapping['api_name']
                 existing.league_id = mapping['league_id']
                 existing.confidence_score = mapping['confidence']
-                existing.is_verified = (mapping['confidence'] >= 0.95)  # Auto-verify perfect matches
+                existing.is_verified = True  # Auto-verify ≥95%
+                logger.info(f"🔄 Updated: {mapping['api_name']} ({mapping['confidence']:.1%})")
             else:
-                # Create new
+                # Create new (solo confianza alta)
                 new_mapping = TeamIDMapping(
                     api_football_id=mapping['api_id'],
                     footystats_id=mapping['fs_id'],
                     team_name=mapping['api_name'],
                     league_id=mapping['league_id'],
                     confidence_score=mapping['confidence'],
-                    is_verified=(mapping['confidence'] >= 0.95)
+                    is_verified=True  # Auto-verify ≥95%
                 )
                 session.add(new_mapping)
+                logger.info(f"✅ Created: {mapping['api_name']} ({mapping['confidence']:.1%})")
 
-        logger.info(f"💾 Saved {len(mappings)} mappings")
+            saved_count += 1
+
+        session.commit()
+
+        logger.info(f"\n💾 Guardados: {saved_count} mapeos de alta confianza")
+        logger.info(f"⚠️  Omitidos: {skipped_count} mapeos de baja confianza")
 
 
 def main():

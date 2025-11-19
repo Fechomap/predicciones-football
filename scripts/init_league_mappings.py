@@ -12,31 +12,18 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from src.database import db_manager, LeagueIDMapping
 
-# Verified league mappings
-# Format: (API-Football ID, FootyStats ID, League Name, Country)
+# Verified league mappings - TEMPORADA 2024-2025
+# Format: (API-Football ID, FootyStats Season ID, League Name, Country)
 LEAGUE_MAPPINGS = [
-    # Premier League (England)
-    (39, 1625, "Premier League", "England"),
+    # TEMPORADA 2024-2025 (IDs actualizados)
+    (39, 12325, "Premier League", "England"),       # 2024-2025
+    (140, 12316, "La Liga", "Spain"),               # 2024-2025
+    (78, 12529, "Bundesliga", "Germany"),           # 2024-2025
+    (135, 12530, "Serie A", "Italy"),               # 2024-2025
+    (262, 12136, "Liga MX", "Mexico"),              # 2024-2025
 
-    # La Liga (Spain)
-    (140, 1729, "La Liga", "Spain"),
-
-    # Bundesliga (Germany)
-    (78, 1845, "Bundesliga", "Germany"),
-
-    # Serie A (Italy)
-    (135, 2105, "Serie A", "Italy"),
-
-    # Ligue 1 (France)
-    (61, 1843, "Ligue 1", "France"),
-
-    # Liga MX (Mexico)
-    (262, 2047, "Liga MX", "Mexico"),  # TODO: Verify FootyStats ID
-
-    # Championship (England 2nd division)
-    (40, 1779, "Championship", "England"),  # TODO: Verify FootyStats ID
-
-    # Add more leagues as needed
+    # NOTA: FootyStats usa IDs por temporada
+    # Actualizar cada año con los nuevos IDs de temporada
 ]
 
 

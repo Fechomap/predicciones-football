@@ -40,9 +40,13 @@ class BotService:
         self.team_mapping_service = TeamMappingService()  # No longer needs footystats_client
         self.enhanced_analyzer = EnhancedAnalyzer(self.footystats_client, self.team_mapping_service)
 
+        # NEW: Initialize AnalysisService with cache (circular dependency resolved)
+        from .analysis_service import AnalysisService
+        self.analysis_service = AnalysisService(self)
+
         self.alerts_sent_today = 0
 
-        logger.info("Bot service initialized with FootyStats integration")
+        logger.info("Bot service initialized with FootyStats integration + AnalysisService cache")
 
     async def check_fixtures(self):
         """Main task: Check upcoming fixtures and analyze"""
@@ -864,43 +868,95 @@ class BotService:
                     return 0.0
 
             # Helper function to detect generic/unreliable API predictions
-            def is_generic_prediction(home_pct: float, draw_pct: float, away_pct: float) -> bool:
+            def is_generic_prediction(
+                home_pct: float,
+                draw_pct: float,
+                away_pct: float,
+                predictions_data: Dict = None
+            ) -> bool:
                 """
                 Detect if API predictions are generic/unreliable
 
-                Generic patterns:
-                - 50-50-0 (no data)
-                - 33-33-33 (equal probabilities)
-                - 10-45-45 (common default pattern)
-                - 45-45-10 (common default pattern)
-                - Any pattern that seems like a default
+                A prediction is considered generic ONLY if:
+                1. It matches a suspicious pattern (50-50-0, 33-33-33, etc.)
+                2. AND lacks specific match data (comparison, h2h, advice)
+
+                This prevents false positives when real predictions happen to match a pattern.
                 """
-                # Pattern 1: 50-50-0 or similar
+                # First check: Does it match a suspicious pattern?
+                matches_suspicious_pattern = False
+
+                # Pattern 1: 50-50-0 or similar (clearly no data)
                 if abs(home_pct - 0.50) < 0.01 and abs(draw_pct - 0.50) < 0.01 and away_pct < 0.01:
-                    return True
-                # Pattern 2: Equal probabilities (33-33-33)
-                if abs(home_pct - 0.33) < 0.02 and abs(draw_pct - 0.33) < 0.02 and abs(away_pct - 0.33) < 0.02:
-                    return True
-                # Pattern 3: 10-45-45 or 45-45-10 (common default for Liga MX)
-                if abs(home_pct - 0.10) < 0.01 and abs(draw_pct - 0.45) < 0.01 and abs(away_pct - 0.45) < 0.01:
-                    return True
-                if abs(home_pct - 0.45) < 0.01 and abs(draw_pct - 0.45) < 0.01 and abs(away_pct - 0.10) < 0.01:
-                    return True
-                # Pattern 4: All zeros
-                if home_pct == 0 and draw_pct == 0 and away_pct == 0:
-                    return True
-                return False
+                    matches_suspicious_pattern = True
+                # Pattern 2: Equal probabilities (33-33-33 - no analysis)
+                elif abs(home_pct - 0.33) < 0.02 and abs(draw_pct - 0.33) < 0.02 and abs(away_pct - 0.33) < 0.02:
+                    matches_suspicious_pattern = True
+                # Pattern 3: All zeros (no data at all)
+                elif home_pct == 0 and draw_pct == 0 and away_pct == 0:
+                    matches_suspicious_pattern = True
+                # Pattern 4: Suspicious 45-45-10 patterns (only if no specific data)
+                elif (abs(home_pct - 0.10) < 0.01 and abs(draw_pct - 0.45) < 0.01 and abs(away_pct - 0.45) < 0.01) or \
+                     (abs(home_pct - 0.45) < 0.01 and abs(draw_pct - 0.45) < 0.01 and abs(away_pct - 0.10) < 0.01):
+                    matches_suspicious_pattern = True
+
+                # If doesn't match any suspicious pattern, it's reliable
+                if not matches_suspicious_pattern:
+                    return False
+
+                # Pattern matched - now verify if we have specific data
+                if predictions_data:
+                    has_specific_data = False
+
+                    # Check for detailed comparison data
+                    comparison = predictions_data.get("comparison", {})
+                    if comparison and isinstance(comparison, dict):
+                        # If comparison has varied values (not all same), it's specific
+                        total_comparison = comparison.get("total", {})
+                        if total_comparison:
+                            has_specific_data = True
+                            logger.debug("✅ Has detailed team comparison data")
+
+                    # Check for H2H data
+                    h2h = predictions_data.get("h2h", [])
+                    if h2h and len(h2h) > 0:
+                        has_specific_data = True
+                        logger.debug(f"✅ Has H2H data ({len(h2h)} matches)")
+
+                    # Check for specific advice
+                    pred = predictions_data.get("predictions", {})
+                    if pred.get("advice") and pred.get("advice") != "N/A":
+                        has_specific_data = True
+                        logger.debug(f"✅ Has specific advice: {pred.get('advice')}")
+
+                    # If we have specific data despite suspicious pattern, it's REAL
+                    if has_specific_data:
+                        logger.info(
+                            f"✅ Pattern {home_pct:.0%}-{draw_pct:.0%}-{away_pct:.0%} matched suspicious pattern "
+                            f"but prediction has specific data → Marking as REAL"
+                        )
+                        return False
+
+                # Suspicious pattern AND no specific data = generic
+                logger.debug(f"⚠️ Pattern {home_pct:.0%}-{draw_pct:.0%}-{away_pct:.0%} with no specific data → Generic")
+                return True
 
             # Parse API predictions
             api_home = safe_parse_percent(api_percent.get("home"))
             api_draw = safe_parse_percent(api_percent.get("draw"))
             api_away = safe_parse_percent(api_percent.get("away"))
 
-            # Check if predictions are generic/unreliable
-            api_predictions_reliable = not is_generic_prediction(api_home, api_draw, api_away)
+            # Check if predictions are generic/unreliable (NOW with data verification)
+            api_predictions_reliable = not is_generic_prediction(
+                api_home, api_draw, api_away,
+                predictions_data=api_predictions  # Pass full data for verification
+            )
 
             if not api_predictions_reliable:
-                logger.warning(f"⚠️ API predictions appear to be generic/unreliable: {api_home:.1%}, {api_draw:.1%}, {api_away:.1%}")
+                logger.warning(
+                    f"⚠️ API predictions appear to be generic/unreliable: "
+                    f"{api_home:.1%}, {api_draw:.1%}, {api_away:.1%} (no specific data)"
+                )
 
             # Build analysis result with BOTH predictions
             return {
