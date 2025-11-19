@@ -140,6 +140,49 @@ class FixturesService:
             logger.error(f"Error getting current week fixtures: {e}")
             return []
 
+    def get_weekly_fixtures(self, league_id: int) -> List[Dict]:
+        """
+        Obtiene TODOS los partidos de la semana (Lun-Dom)
+
+        Diferente a get_current_week_fixtures:
+        - get_current_week_fixtures: próximos 7 días desde HOY
+        - get_weekly_fixtures: semana completa (desde el lunes)
+
+        Args:
+            league_id: League ID
+
+        Returns:
+            List de TODOS los partidos de la semana
+        """
+        try:
+            with db_manager.get_session() as session:
+                now = datetime.now()
+
+                # Calcular inicio de semana (lunes)
+                days_since_monday = now.weekday()  # 0=Lunes, 6=Domingo
+                week_start = now - timedelta(days=days_since_monday)
+                week_start = week_start.replace(hour=0, minute=0, second=0, microsecond=0)
+
+                # Fin de semana (domingo)
+                week_end = week_start + timedelta(days=7)
+
+                query = session.query(Fixture).filter(
+                    Fixture.kickoff_time >= week_start,
+                    Fixture.kickoff_time < week_end,
+                    Fixture.league_id == league_id,
+                    Fixture.status == "NS"  # Not Started
+                )
+
+                fixtures = query.order_by(Fixture.kickoff_time).all()
+
+                logger.info(f"📅 Found {len(fixtures)} fixtures for league {league_id} (semana completa Lun-Dom)")
+
+                return self._convert_to_api_format(fixtures, session)
+
+        except Exception as e:
+            logger.error(f"Error getting weekly fixtures: {e}")
+            return []
+
     def get_fixture_by_id(self, fixture_id: int) -> Optional[Dict]:
         """
         Get a single fixture by ID

@@ -294,24 +294,96 @@ Selecciona el deporte que deseas consultar:
                 reply_markup=self.get_sports_menu()
             )
 
-    async def show_leagues_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE, sport_id: str, page: int = 0):
-        """Show leagues menu"""
-        sport_name = next((s["name"] for s in self.SPORTS if s["id"] == sport_id), "Deporte")
+    async def show_countries_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE, sport_id: str = "football", page: int = 1):
+        """Show countries menu (NUEVO: Deporte → País → Ligas)"""
+        from ..services.country_service import CountryService
+
+        sport_name = next((s["name"] for s in self.SPORTS if s["id"] == sport_id), "⚽ Fútbol")
 
         message = f"""
+{sport_name}
+
+Selecciona el país:
+"""
+
+        # Store current sport
+        context.user_data['current_sport'] = sport_id
+
+        # Obtener países paginados
+        countries_data = CountryService.get_all_countries_paginated(page=page, per_page=10)
+
+        keyboard = []
+        for country in countries_data['countries']:
+            keyboard.append([InlineKeyboardButton(
+                f"{country['emoji']} {country['name']}",
+                callback_data=f"country_{country['name']}"
+            )])
+
+        # Paginación de países
+        nav_buttons = []
+        if countries_data['has_prev']:
+            nav_buttons.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"countries_page_{page-1}"))
+        if countries_data['has_next']:
+            nav_buttons.append(InlineKeyboardButton("➡️ Siguiente", callback_data=f"countries_page_{page+1}"))
+
+        if nav_buttons:
+            keyboard.append(nav_buttons)
+
+        keyboard.append([InlineKeyboardButton("🔙 Volver", callback_data="back_to_sports")])
+
+        await update.callback_query.edit_message_text(
+            message,
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    async def show_leagues_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE, country_name: str = None, sport_id: str = "football", page: int = 0):
+        """Show leagues menu for a specific country"""
+        from ..services.country_service import CountryService
+
+        if country_name:
+            # Mostrar ligas del país
+            country_info = CountryService.get_country_info(country_name)
+            leagues = CountryService.get_leagues_by_country(country_name)
+
+            message = f"""
+{country_info['emoji']} <b>{country_name}</b>
+
+Selecciona la liga:
+"""
+
+            keyboard = []
+            for league in leagues:
+                tier_emoji = "⭐" if league['tier'] == 1 else "📊"
+                keyboard.append([InlineKeyboardButton(
+                    f"{tier_emoji} {league['name']}",
+                    callback_data=f"league_{league['id']}"
+                )])
+
+            keyboard.append([InlineKeyboardButton("🔙 Volver a Países", callback_data="back_to_countries")])
+
+            await update.callback_query.edit_message_text(
+                message,
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        else:
+            # Fallback al menú anterior (por compatibilidad)
+            sport_name = next((s["name"] for s in self.SPORTS if s["id"] == sport_id), "Deporte")
+
+            message = f"""
 {sport_name}
 
 Selecciona la liga que deseas consultar:
 """
 
-        # Store current sport in context
-        context.user_data['current_sport'] = sport_id
+            context.user_data['current_sport'] = sport_id
 
-        await update.callback_query.edit_message_text(
-            message,
-            parse_mode="HTML",
-            reply_markup=self.get_leagues_menu(sport_id, page)
-        )
+            await update.callback_query.edit_message_text(
+                message,
+                parse_mode="HTML",
+                reply_markup=self.get_leagues_menu(sport_id, page)
+            )
 
     async def show_fixtures_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE, league_id: int):
         """Show fixtures menu"""

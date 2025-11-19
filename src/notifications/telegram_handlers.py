@@ -2,7 +2,7 @@
 import asyncio
 import os
 from typing import TYPE_CHECKING
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from ..utils.logger import setup_logger
@@ -69,6 +69,12 @@ class TelegramHandlers:
             elif callback_data.startswith("league_"):
                 await self._handle_league_selection(update, context, callback_data)
 
+            elif callback_data.startswith("country_"):
+                await self._handle_country_selection(update, context, callback_data)
+
+            elif callback_data.startswith("countries_page_"):
+                await self._handle_countries_pagination(update, context, callback_data)
+
             elif callback_data.startswith("leagues_page_"):
                 await self._handle_leagues_pagination(update, context, callback_data)
 
@@ -102,9 +108,17 @@ class TelegramHandlers:
             elif callback_data == "back_to_sports":
                 await self.menu.show_sports_menu(update, context)
 
-            elif callback_data == "back_to_leagues":
+            elif callback_data == "back_to_countries":
                 sport_id = context.user_data.get('current_sport', 'football')
-                await self.menu.show_leagues_menu(update, context, sport_id)
+                await self.menu.show_countries_menu(update, context, sport_id=sport_id, page=1)
+
+            elif callback_data == "back_to_leagues":
+                country_name = context.user_data.get('current_country')
+                if country_name:
+                    await self.menu.show_leagues_menu(update, context, country_name=country_name)
+                else:
+                    sport_id = context.user_data.get('current_sport', 'football')
+                    await self.menu.show_leagues_menu(update, context, sport_id=sport_id)
 
             elif callback_data == "back_to_fixtures":
                 league_id = context.user_data.get('current_league')
@@ -126,9 +140,15 @@ class TelegramHandlers:
             await query.answer("❌ Error procesando acción", show_alert=True)
 
     async def _handle_sport_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE, callback_data: str):
-        """Handle sport selection"""
+        """Handle sport selection - NUEVO: va a países"""
         sport_id = callback_data.replace("sport_", "")
-        await self.menu.show_leagues_menu(update, context, sport_id)
+
+        if sport_id == "football":
+            # NUEVO FLUJO: Fútbol → Países → Ligas
+            await self.menu.show_countries_menu(update, context, sport_id=sport_id, page=1)
+        else:
+            # Otros deportes: directo a ligas (futuro)
+            await self.menu.show_leagues_menu(update, context, sport_id=sport_id)
 
     async def _handle_league_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE, callback_data: str):
         """Handle league selection"""
@@ -588,6 +608,18 @@ Stake sugerido: {value.get('suggested_stake', 0)*100:.0f}% del bankroll
             reply_markup=self.menu.get_fixture_actions_menu(fixture_id)
         )
 
+    async def _handle_country_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE, callback_data: str):
+        """Handle country selection - NUEVO"""
+        country_name = callback_data.replace("country_", "")
+        context.user_data['current_country'] = country_name
+        await self.menu.show_leagues_menu(update, context, country_name=country_name)
+
+    async def _handle_countries_pagination(self, update: Update, context: ContextTypes.DEFAULT_TYPE, callback_data: str):
+        """Handle countries pagination"""
+        page = int(callback_data.replace("countries_page_", ""))
+        sport_id = context.user_data.get('current_sport', 'football')
+        await self.menu.show_countries_menu(update, context, sport_id=sport_id, page=page)
+
     async def _handle_fixtures_pagination(self, update: Update, context: ContextTypes.DEFAULT_TYPE, callback_data: str):
         """Handle fixtures pagination (Anterior/Siguiente)"""
         # Parse: fixtures_page_{league_id}_{page}
@@ -672,7 +704,6 @@ Stake sugerido: {value.get('suggested_stake', 0)*100:.0f}% del bankroll
                         callback_data=f"fixture_{fixture_id}"
                     )])
 
-                from telegram import InlineKeyboardMarkup
                 await update.callback_query.message.reply_text(
                     "🎯 <b>Top 3 partidos con mayor confianza:</b>",
                     parse_mode="HTML",
