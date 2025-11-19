@@ -189,7 +189,8 @@ class ValueDetector:
     def get_confidence_rating(
         edge: float,
         sample_size: int = None,
-        thresholds: Dict[str, float] = None
+        thresholds: Dict[str, float] = None,
+        footystats_quality: float = 50.0
     ) -> int:
         """
         Get confidence rating (1-5 stars)
@@ -198,6 +199,7 @@ class ValueDetector:
             edge: Betting edge (0-1, NOT percentage)
             sample_size: Number of data points used
             thresholds: Custom thresholds dict (configurable)
+            footystats_quality: Quality score from FootyStats (0-100)
 
         Returns:
             Confidence rating (1-5)
@@ -230,6 +232,14 @@ class ValueDetector:
         # Adjust for sample size
         if sample_size < 3:
             base_confidence = max(1, base_confidence - 1)
+
+        # ENHANCED: Boost confidence if FootyStats quality is high
+        if footystats_quality >= 80 and base_confidence < 5:
+            base_confidence = min(5, base_confidence + 1)
+            logger.debug(f"Confidence boosted due to high FootyStats quality: {footystats_quality}")
+        elif footystats_quality < 30 and base_confidence > 1:
+            base_confidence = max(1, base_confidence - 1)
+            logger.debug(f"Confidence reduced due to low FootyStats quality: {footystats_quality}")
 
         return base_confidence
 

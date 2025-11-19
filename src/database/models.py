@@ -60,7 +60,17 @@ class Fixture(Base):
     status = Column(String(20), default="scheduled")  # scheduled, live, finished, postponed
     venue = Column(String(100))
     round = Column(String(50))
+
+    # Season and week tracking (for calendar filtering and permanent storage)
+    season = Column(Integer)  # e.g., 2025
+    week = Column(Integer)  # Matchday/gameweek number (extracted from round)
+
+    # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
+    last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Archival flag (for historical data management)
+    is_archived = Column(Boolean, default=False)
 
     # Relationships
     league = relationship("League", back_populates="fixtures")
@@ -69,6 +79,7 @@ class Fixture(Base):
     odds = relationship("OddsHistory", back_populates="fixture")
     predictions = relationship("Prediction", back_populates="fixture")
     value_bets = relationship("ValueBet", back_populates="fixture")
+    analysis_history = relationship("AnalysisHistory", back_populates="fixture")
 
     def __repr__(self):
         return f"<Fixture {self.id}: {self.home_team.name if self.home_team else 'TBD'} vs {self.away_team.name if self.away_team else 'TBD'}>"
@@ -205,3 +216,77 @@ class NotificationLog(Base):
 
     def __repr__(self):
         return f"<NotificationLog {self.status} at {self.sent_at}>"
+
+
+class LeagueIDMapping(Base):
+    """Mapping between API-Football and FootyStats league IDs"""
+    __tablename__ = "league_id_mapping"
+
+    id = Column(Integer, primary_key=True)
+    api_football_id = Column(Integer, unique=True, nullable=False, index=True)
+    footystats_id = Column(Integer, nullable=False)
+    league_name = Column(String(100), nullable=False)
+    country = Column(String(50), nullable=False)
+    is_verified = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<LeagueIDMapping {self.league_name} API:{self.api_football_id} FS:{self.footystats_id}>"
+
+
+class TeamIDMapping(Base):
+    """Mapping between API-Football and FootyStats team IDs"""
+    __tablename__ = "team_id_mapping"
+
+    id = Column(Integer, primary_key=True)
+    api_football_id = Column(Integer, unique=True, nullable=False, index=True)
+    footystats_id = Column(Integer, nullable=True)
+    team_name = Column(String(100), nullable=False)
+    league_id = Column(Integer, ForeignKey("league_id_mapping.api_football_id"), nullable=True)
+    confidence_score = Column(Numeric(3, 2), default=1.0)  # 0.0-1.0 similarity score
+    is_verified = Column(Boolean, default=False)  # Manual verification flag
+    last_verified = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<TeamIDMapping {self.team_name} API:{self.api_football_id} FS:{self.footystats_id}>"
+
+
+class AnalysisHistory(Base):
+    """Historical analysis reports with PDF storage"""
+    __tablename__ = "analysis_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    fixture_id = Column(Integer, ForeignKey("fixtures.id"), nullable=False)
+
+    # PDF storage
+    pdf_url = Column(Text)  # Full URL for download
+    pdf_cloudflare_key = Column(Text)  # R2 storage key
+
+    # Confidence and ranking
+    confidence_score = Column(Numeric(5, 2))  # 0-100 score for betting safety
+    analysis_type = Column(String(50), default="complete")  # complete, quick, live
+
+    # Snapshot data (for historical reference without joins)
+    home_team_name = Column(String(100))
+    away_team_name = Column(String(100))
+    league_name = Column(String(100))
+    kickoff_time = Column(DateTime)
+
+    # Predictions snapshot
+    home_probability = Column(Numeric(5, 2))
+    draw_probability = Column(Numeric(5, 2))
+    away_probability = Column(Numeric(5, 2))
+    recommended_bet = Column(String(50))
+    edge = Column(Numeric(5, 2))
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    fixture = relationship("Fixture", back_populates="analysis_history")
+
+    def __repr__(self):
+        return f"<AnalysisHistory fixture={self.fixture_id} confidence={self.confidence_score}>"

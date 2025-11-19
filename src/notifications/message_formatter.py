@@ -107,7 +107,31 @@ class MessageFormatter:
 🔥 <b>Forma reciente (últimos 5):</b>
 • {home_team}: {MessageFormatter._format_form_string(home_form.get('form_string', 'N/A'))} ({home_form.get('points', 0)} pts)
 • {away_team}: {MessageFormatter._format_form_string(away_form.get('form_string', 'N/A'))} ({away_form.get('points', 0)} pts)
+"""
 
+        # Add FootyStats enhanced metrics if available (only if valid data)
+        footystats = analysis.get("footystats")
+        if footystats and footystats.get('quality_score', 0) > 0:
+            quality_score = footystats.get('quality_score', 0)
+            btts_prob = footystats.get('btts_probability', 0) * 100
+            over_25_prob = footystats.get('over_25_probability', 0) * 100
+            intensity = footystats.get('match_intensity', 'medium')
+
+            intensity_emoji = {
+                'low': '🟢',
+                'medium': '🟡',
+                'high': '🔴'
+            }.get(intensity, '⚪')
+
+            message += f"""
+📊 <b>DATOS MEJORADOS (FootyStats):</b>
+• Calidad del partido: {quality_score:.0f}/100
+• BTTS Probabilidad: {btts_prob:.1f}%
+• Over 2.5 Probabilidad: {over_25_prob:.1f}%
+• Intensidad: {intensity_emoji} {intensity.capitalize()}
+"""
+
+        message += f"""
 ━━━━━━━━━━━━━━━━━━━━━━
 
 💰 <b>RECOMENDACIÓN</b>
@@ -151,6 +175,191 @@ class MessageFormatter:
         # Replace W, D, L with emojis
         emoji_form = form_string.replace('W', '✅').replace('D', '🟨').replace('L', '❌')
         return emoji_form
+
+    @staticmethod
+    def format_apifootball_analysis(analysis: Dict) -> str:
+        """Format API-Football analysis message"""
+        teams = analysis.get("teams", {})
+        fixture_info = analysis.get("fixture_info", {})
+        league = analysis.get("league", {})
+        predictions = analysis.get("predictions", {})
+        percent = analysis.get("percent", {})
+
+        home_team = teams.get("home", {}).get("name", "Unknown")
+        away_team = teams.get("away", {}).get("name", "Unknown")
+        league_name = league.get("name", "Unknown")
+        date_str = fixture_info.get("date", "")[:16].replace("T", " ")
+
+        home_pct = float(str(percent.get('home', '0')).rstrip('%')) if percent.get('home') else 0
+        draw_pct = float(str(percent.get('draw', '0')).rstrip('%')) if percent.get('draw') else 0
+        away_pct = float(str(percent.get('away', '0')).rstrip('%')) if percent.get('away') else 0
+
+        winner = predictions.get("winner", {}).get("name", "N/A")
+        advice = predictions.get("advice", "N/A")
+
+        return f"""
+🤖 <b>PREDICCIÓN API-FOOTBALL (AI)</b>
+
+🏆 {league_name}
+📅 {home_team} vs {away_team}
+🕐 {date_str}
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+📊 <b>PROBABILIDADES AI</b>
+• Local (1): {home_pct:.1f}%
+• Empate (X): {draw_pct:.1f}%
+• Visitante (2): {away_pct:.1f}%
+
+🎯 <b>RECOMENDACIÓN</b>
+• Ganador sugerido: {winner}
+• Consejo: {advice}
+
+⚠️ <i>Predicción basada en AI de API-Football</i>
+"""
+
+    @staticmethod
+    def format_poisson_analysis(analysis: Dict) -> str:
+        """Format Poisson analysis message"""
+        teams = analysis.get("teams", {})
+        fixture_info = analysis.get("fixture_info", {})
+        league = analysis.get("league", {})
+        probabilities = analysis.get("probabilities", {})
+        expected_goals = analysis.get("expected_goals", {})
+        goal_ranges = analysis.get("goal_ranges", {})
+        best_odds = analysis.get("best_odds", {})
+
+        home_team = teams.get("home", {}).get("name", "Unknown")
+        away_team = teams.get("away", {}).get("name", "Unknown")
+        league_name = league.get("name", "Unknown")
+        date_str = fixture_info.get("date", "")[:16].replace("T", " ")
+
+        home_prob = probabilities.get("home_win", 0)
+        draw_prob = probabilities.get("draw", 0)
+        away_prob = probabilities.get("away_win", 0)
+
+        message = f"""
+🧮 <b>ANÁLISIS POISSON (Modelo Matemático)</b>
+
+🏆 {league_name}
+📅 {home_team} vs {away_team}
+🕐 {date_str}
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+📊 <b>PROBABILIDADES CALCULADAS</b>
+• Local (1): {home_prob*100:.1f}%
+• Empate (X): {draw_prob*100:.1f}%
+• Visitante (2): {away_prob*100:.1f}%
+
+⚽ <b>GOLES ESPERADOS</b>
+• {home_team}: {expected_goals.get('home', 0):.2f}
+• {away_team}: {expected_goals.get('away', 0):.2f}
+
+🥅 <b>PROBABILIDAD DE GOLES TOTALES</b>
+• 0-1 Goles: {goal_ranges.get('0-1', 0) * 100:.1f}%
+• 2-3 Goles: {goal_ranges.get('2-3', 0) * 100:.1f}%
+• 4+ Goles: {goal_ranges.get('4+', 0) * 100:.1f}%
+"""
+
+        if analysis.get("has_odds") and best_odds:
+            message += f"""
+━━━━━━━━━━━━━━━━━━━━━━
+
+💰 <b>CUOTAS DISPONIBLES</b>
+• Local: {best_odds.get('Home', 'N/A')}
+• Empate: {best_odds.get('Draw', 'N/A')}
+• Visitante: {best_odds.get('Away', 'N/A')}
+"""
+
+        message += "\n⚠️ <i>Predicción basada en distribución de Poisson</i>"
+        return message
+
+    @staticmethod
+    def format_footystats_analysis(analysis: Dict) -> str:
+        """Format FootyStats analysis message"""
+        if not analysis.get("available"):
+            return f"""
+📈 <b>ANÁLISIS FOOTYSTATS</b>
+
+❌ {analysis.get('message', 'Datos no disponibles')}
+
+💡 <i>FootyStats requiere mapeo de IDs de equipos.
+Algunos equipos pueden no estar disponibles aún.</i>
+"""
+
+        teams = analysis.get("teams", {})
+        fixture_info = analysis.get("fixture_info", {})
+        league = analysis.get("league", {})
+        fs_data = analysis.get("analysis", {})
+
+        home_team = teams.get("home", {}).get("name", "Unknown")
+        away_team = teams.get("away", {}).get("name", "Unknown")
+        league_name = league.get("name", "Unknown")
+        date_str = fixture_info.get("date", "")[:16].replace("T", " ")
+
+        quality_score = fs_data.get('quality_score', 0)
+        btts_prob = fs_data.get('btts_probability', 0) * 100
+        over_25_prob = fs_data.get('over_25_probability', 0) * 100
+        intensity = fs_data.get('match_intensity', 'medium')
+        home_stats = fs_data.get('home_stats', {})
+        away_stats = fs_data.get('away_stats', {})
+
+        intensity_emoji = {
+            'low': '🟢',
+            'medium': '🟡',
+            'high': '🔴'
+        }.get(intensity, '⚪')
+
+        return f"""
+📈 <b>DATOS HISTÓRICOS DE LA TEMPORADA</b>
+
+🏆 {league_name}
+📅 {home_team} vs {away_team}
+🕐 {date_str}
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+📊 <b>CALIDAD ESPERADA DEL PARTIDO</b>
+• Calificación: {quality_score:.0f}/100 {'🔥' if quality_score >= 70 else '⚽' if quality_score >= 50 else '😴'}
+• Ritmo del juego: {intensity_emoji} {intensity.capitalize()}
+
+⚽ <b>PROBABILIDADES DE GOLES</b>
+• Ambos equipos anoten: {btts_prob:.1f}%
+• Más de 2.5 goles (3+): {over_25_prob:.1f}%
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+📊 <b>¿CÓMO JUEGA {home_team.upper()}?</b>
+• Mete goles (promedio): {home_stats.get('avg_goals_scored', 0):.2f} por partido
+• Le meten goles (promedio): {home_stats.get('avg_goals_conceded', 0):.2f} por partido
+• Tiros de esquina (promedio): {home_stats.get('avg_corners', 0):.1f} por partido
+• Tiros al arco (promedio): {home_stats.get('avg_shots_on_target', 0):.1f} por partido
+• Posesión (promedio): {home_stats.get('avg_possession', 0):.1f}%
+• Ambos anotan: {home_stats.get('btts_percentage', 0):.1f}% de sus partidos
+• +3 goles total: {home_stats.get('over_25_percentage', 0):.1f}% de sus partidos
+• Rendimiento: {home_stats.get('ppg', 0):.2f} pts/juego {'🔥' if home_stats.get('ppg', 0) >= 2 else '⚽' if home_stats.get('ppg', 0) >= 1 else '😔'}
+• Récord: {home_stats.get('matches_played', 0)} partidos ({home_stats.get('wins', 0)}V-{home_stats.get('draws', 0)}E-{home_stats.get('losses', 0)}D)
+
+📊 <b>¿CÓMO JUEGA {away_team.upper()}?</b>
+• Mete goles (promedio): {away_stats.get('avg_goals_scored', 0):.2f} por partido
+• Le meten goles (promedio): {away_stats.get('avg_goals_conceded', 0):.2f} por partido
+• Tiros de esquina (promedio): {away_stats.get('avg_corners', 0):.1f} por partido
+• Tiros al arco (promedio): {away_stats.get('avg_shots_on_target', 0):.1f} por partido
+• Posesión (promedio): {away_stats.get('avg_possession', 0):.1f}%
+• Ambos anotan: {away_stats.get('btts_percentage', 0):.1f}% de sus partidos
+• +3 goles total: {away_stats.get('over_25_percentage', 0):.1f}% de sus partidos
+• Rendimiento: {away_stats.get('ppg', 0):.2f} pts/juego {'🔥' if away_stats.get('ppg', 0) >= 2 else '⚽' if away_stats.get('ppg', 0) >= 1 else '😔'}
+• Récord: {away_stats.get('matches_played', 0)} partidos ({away_stats.get('wins', 0)}V-{away_stats.get('draws', 0)}E-{away_stats.get('losses', 0)}D)
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+💡 <b>INTERPRETACIÓN RÁPIDA</b>
+{'🎯 Partido con muchos goles esperados' if over_25_prob >= 60 else '⚽ Goles normales esperados' if over_25_prob >= 45 else '🔒 Partido cerrado, pocos goles'}
+{'✅ Probable que ambos anoten' if btts_prob >= 60 else '⚠️ Quizá solo uno anote' if btts_prob >= 45 else '❌ Difícil que ambos anoten'}
+
+⚠️ <i>Basado en datos reales de la temporada actual</i>
+"""
 
     @staticmethod
     def format_daily_summary(

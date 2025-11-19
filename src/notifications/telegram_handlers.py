@@ -1,5 +1,6 @@
 """Telegram callback handlers for inline buttons"""
 import asyncio
+import os
 from typing import TYPE_CHECKING
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -8,6 +9,7 @@ from ..utils.logger import setup_logger
 from ..utils.cache import fixtures_cache
 from .telegram_menu import TelegramMenu
 from .message_formatter import MessageFormatter
+from ..reports import PDFReportGenerator
 
 if TYPE_CHECKING:
     from ..services import BotService
@@ -73,6 +75,15 @@ class TelegramHandlers:
             elif callback_data.startswith("fixture_"):
                 await self._handle_fixture_selection(update, context, callback_data)
 
+            elif callback_data.startswith("analyze_apifootball_"):
+                await self._handle_analyze_apifootball(update, context, callback_data)
+
+            elif callback_data.startswith("analyze_poisson_"):
+                await self._handle_analyze_poisson(update, context, callback_data)
+
+            elif callback_data.startswith("analyze_footystats_"):
+                await self._handle_analyze_footystats(update, context, callback_data)
+
             elif callback_data.startswith("analyze_"):
                 await self._handle_analyze_fixture(update, context, callback_data)
 
@@ -130,7 +141,7 @@ class TelegramHandlers:
         await self.menu.show_fixture_details(update, context, fixture_id)
 
     async def _handle_analyze_fixture(self, update: Update, context: ContextTypes.DEFAULT_TYPE, callback_data: str):
-        """Handle analyze fixture request"""
+        """Handle analyze fixture request - Shows analysis in chat AND generates PDF"""
         fixture_id = int(callback_data.replace("analyze_", ""))
 
         await safe_edit_message(
@@ -143,7 +154,7 @@ class TelegramHandlers:
             # Get fixtures from BD (fast)
             fixtures = await asyncio.to_thread(
                 self.bot_service.fixtures_service.get_upcoming_fixtures,
-                hours_ahead=168,
+                hours_ahead=360,  # 15 días
                 force_refresh=False
             )
 
@@ -180,7 +191,7 @@ class TelegramHandlers:
             # Format analysis message
             message = self._format_analysis(fixture, analysis)
 
-            # Send analysis
+            # Send analysis text in Telegram
             await safe_edit_message(
                 update.callback_query,
                 message,
@@ -192,6 +203,44 @@ class TelegramHandlers:
                 "¿Qué deseas hacer?",
                 reply_markup=self.menu.get_fixture_actions_menu(fixture_id)
             )
+
+            # === GENERATE AND SEND PDF ===
+            # This runs in parallel to provide comprehensive report
+            await update.callback_query.message.reply_text(
+                "📄 Generando reporte PDF completo...",
+                parse_mode="HTML"
+            )
+
+            try:
+                pdf_path = await asyncio.to_thread(
+                    self._generate_analysis_pdf,
+                    fixture,
+                    analysis
+                )
+
+                if pdf_path:
+                    # Send PDF document
+                    with open(pdf_path, 'rb') as pdf_file:
+                        await update.callback_query.message.reply_document(
+                            document=pdf_file,
+                            caption=f"📊 Análisis Completo - {fixture['teams']['home']['name']} vs {fixture['teams']['away']['name']}",
+                            filename=os.path.basename(pdf_path)
+                        )
+
+                    # Clean up temp file
+                    try:
+                        os.remove(pdf_path)
+                    except:
+                        pass
+
+                    logger.info(f"PDF sent successfully for fixture {fixture_id}")
+
+            except Exception as pdf_error:
+                logger.error(f"Error generating/sending PDF: {pdf_error}")
+                await update.callback_query.message.reply_text(
+                    "⚠️ El análisis se completó, pero hubo un error al generar el PDF.",
+                    parse_mode="HTML"
+                )
 
             logger.info(f"Analysis completed for fixture {fixture_id}")
 
@@ -216,7 +265,7 @@ class TelegramHandlers:
         # Force refresh from API
         await asyncio.to_thread(
             self.bot_service.fixtures_service.get_upcoming_fixtures,
-            hours_ahead=168,
+            hours_ahead=360,  # 15 días
             force_refresh=True  # This forces new API call
         )
 
@@ -232,7 +281,7 @@ class TelegramHandlers:
         # Force refresh from API
         await asyncio.to_thread(
             self.bot_service.fixtures_service.get_upcoming_fixtures,
-            hours_ahead=168,
+            hours_ahead=360,  # 15 días
             force_refresh=True  # This forces new API call
         )
 
@@ -305,6 +354,29 @@ class TelegramHandlers:
 • {away_team} (visita): {stats.get('away_matches', 0)} partidos
 """
 
+        # Add FootyStats enhanced metrics if available (only if valid data)
+        footystats = analysis.get("footystats")
+        if footystats and footystats.get('quality_score', 0) > 0:
+            quality_score = footystats.get('quality_score', 0)
+            btts_prob = footystats.get('btts_probability', 0) * 100
+            over_25_prob = footystats.get('over_25_probability', 0) * 100
+            intensity = footystats.get('match_intensity', 'medium')
+
+            intensity_emoji = {
+                'low': '🟢',
+                'medium': '🟡',
+                'high': '🔴'
+            }.get(intensity, '⚪')
+
+            message += f"""
+📊 <b>DATOS MEJORADOS (FootyStats):</b>
+• Calidad del partido: {quality_score:.0f}/100
+• BTTS Probabilidad: {btts_prob:.1f}%
+• Over 2.5 Probabilidad: {over_25_prob:.1f}%
+• Intensidad: {intensity_emoji} {intensity.capitalize()}
+
+"""
+
         # Add value bet section if detected
         if analysis.get("odds_unavailable"):
             # No odds available - show warning
@@ -349,3 +421,232 @@ Stake sugerido: {value.get('suggested_stake', 0)*100:.0f}% del bankroll
         message += "\n\n⚠️ Análisis estadístico - Apuesta responsable"
 
         return message
+
+    async def _handle_analyze_apifootball(self, update: Update, context: ContextTypes.DEFAULT_TYPE, callback_data: str):
+        """Handle API-Football analysis button"""
+        import html
+
+        fixture_id = int(callback_data.split("_")[-1])
+        logger.info(f"API-Football analysis requested for fixture {fixture_id}")
+
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(
+            "🤖 Analizando con API-Football...",
+            parse_mode="HTML"
+        )
+
+        # Get fixture
+        fixtures = await asyncio.to_thread(
+            self.bot_service.fixtures_service.get_upcoming_fixtures,
+            hours_ahead=360,
+            force_refresh=False
+        )
+        fixture = next((f for f in fixtures if f.get("fixture", {}).get("id") == fixture_id), None)
+
+        if not fixture:
+            await update.callback_query.edit_message_text("❌ Partido no encontrado")
+            return
+
+        # Analyze with API-Football only
+        analysis = await asyncio.to_thread(
+            self.bot_service.analyze_fixture_apifootball,
+            fixture
+        )
+
+        if not analysis:
+            await update.callback_query.edit_message_text("❌ Error en el análisis")
+            return
+
+        # Format message
+        message = MessageFormatter.format_apifootball_analysis(analysis)
+
+        await update.callback_query.edit_message_text(
+            message,
+            parse_mode="HTML",
+            reply_markup=self.menu.get_fixture_actions_menu(fixture_id)
+        )
+
+    async def _handle_analyze_poisson(self, update: Update, context: ContextTypes.DEFAULT_TYPE, callback_data: str):
+        """Handle Poisson analysis button"""
+        fixture_id = int(callback_data.split("_")[-1])
+        logger.info(f"Poisson analysis requested for fixture {fixture_id}")
+
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(
+            "🧮 Calculando con modelo Poisson...",
+            parse_mode="HTML"
+        )
+
+        # Get fixture
+        fixtures = await asyncio.to_thread(
+            self.bot_service.fixtures_service.get_upcoming_fixtures,
+            hours_ahead=360,
+            force_refresh=False
+        )
+        fixture = next((f for f in fixtures if f.get("fixture", {}).get("id") == fixture_id), None)
+
+        if not fixture:
+            await update.callback_query.edit_message_text("❌ Partido no encontrado")
+            return
+
+        # Analyze with Poisson only
+        analysis = await asyncio.to_thread(
+            self.bot_service.analyze_fixture_poisson,
+            fixture
+        )
+
+        if not analysis:
+            await update.callback_query.edit_message_text("❌ Error en el análisis")
+            return
+
+        # Format message
+        message = MessageFormatter.format_poisson_analysis(analysis)
+
+        await update.callback_query.edit_message_text(
+            message,
+            parse_mode="HTML",
+            reply_markup=self.menu.get_fixture_actions_menu(fixture_id)
+        )
+
+    async def _handle_analyze_footystats(self, update: Update, context: ContextTypes.DEFAULT_TYPE, callback_data: str):
+        """Handle FootyStats analysis button"""
+        fixture_id = int(callback_data.split("_")[-1])
+        logger.info(f"FootyStats analysis requested for fixture {fixture_id}")
+
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(
+            "📈 Obteniendo datos de FootyStats...",
+            parse_mode="HTML"
+        )
+
+        # Get fixture
+        fixtures = await asyncio.to_thread(
+            self.bot_service.fixtures_service.get_upcoming_fixtures,
+            hours_ahead=360,
+            force_refresh=False
+        )
+        fixture = next((f for f in fixtures if f.get("fixture", {}).get("id") == fixture_id), None)
+
+        if not fixture:
+            await update.callback_query.edit_message_text("❌ Partido no encontrado")
+            return
+
+        # Analyze with FootyStats only
+        analysis = await asyncio.to_thread(
+            self.bot_service.analyze_fixture_footystats,
+            fixture
+        )
+
+        if not analysis:
+            await update.callback_query.edit_message_text("❌ Error en el análisis")
+            return
+
+        # Format message
+        message = MessageFormatter.format_footystats_analysis(analysis)
+
+        await update.callback_query.edit_message_text(
+            message,
+            parse_mode="HTML",
+            reply_markup=self.menu.get_fixture_actions_menu(fixture_id)
+        )
+
+    def _generate_analysis_pdf(self, fixture: dict, analysis: dict) -> str:
+        """
+        Generate PDF report with complete analysis
+
+        Combines all three analysis sources:
+        - API-Football predictions
+        - Poisson statistical model
+        - FootyStats historical data
+
+        Args:
+            fixture: Fixture data
+            analysis: Complete analysis from bot_service.analyze_fixture()
+
+        Returns:
+            Path to generated PDF file
+        """
+        try:
+            # Initialize PDF generator
+            pdf_gen = PDFReportGenerator()
+
+            # Extract analysis components
+            api_pred = analysis.get("api_prediction", {})
+            our_pred = analysis.get("our_prediction", {})
+            stats = analysis.get("statistics", {})
+            goal_ranges = analysis.get("goal_ranges", {})
+            value = analysis.get("value_bet")
+            footystats = analysis.get("footystats")
+
+            # Prepare API-Football analysis section
+            # Extract form data correctly (it's a dict with 'form_string' and 'points')
+            home_form_data = stats.get('home_form', {})
+            away_form_data = stats.get('away_form', {})
+
+            api_football_analysis = {
+                'predictions': {
+                    'home': api_pred.get('home', 0) * 100 if api_pred.get('home') else 0,
+                    'draw': api_pred.get('draw', 0) * 100 if api_pred.get('draw') else 0,
+                    'away': api_pred.get('away', 0) * 100 if api_pred.get('away') else 0,
+                    'advice': api_pred.get('winner', 'N/A')
+                },
+                'form': {
+                    'home': home_form_data.get('form_string', 'N/A') if isinstance(home_form_data, dict) else str(home_form_data),
+                    'away': away_form_data.get('form_string', 'N/A') if isinstance(away_form_data, dict) else str(away_form_data),
+                    # FIX: Calculate points per game correctly (total points / 5 games)
+                    'home_points': home_form_data.get('points', 0) / 5 if isinstance(home_form_data, dict) and home_form_data.get('points') else 0,
+                    'away_points': away_form_data.get('points', 0) / 5 if isinstance(away_form_data, dict) and away_form_data.get('points') else 0
+                }
+            }
+
+            # Prepare Poisson analysis section
+            poisson_analysis = {
+                'probabilities': {
+                    'home_win': our_pred.get('home', 0) * 100,
+                    'draw': our_pred.get('draw', 0) * 100,
+                    'away_win': our_pred.get('away', 0) * 100
+                },
+                'expected_goals_home': stats.get('expected_goals_home', 0),
+                'expected_goals_away': stats.get('expected_goals_away', 0)
+            }
+
+            # Prepare FootyStats analysis section (if available)
+            footystats_analysis = None
+            if footystats and footystats.get('quality_score', 0) > 0:
+                footystats_analysis = {
+                    'quality_score': footystats.get('quality_score', 0),
+                    'home_team_stats': footystats.get('home_stats', {}),
+                    'away_team_stats': footystats.get('away_stats', {})
+                }
+
+            # Prepare value bet analysis
+            value_bet_analysis = None
+            if analysis.get("has_value") and value:
+                value_bet_analysis = {
+                    'has_value': True,
+                    'recommended_bet': value.get('outcome', 'N/A'),
+                    'odds': value.get('odds', 0),
+                    'edge': value.get('edge', 0) * 100,
+                    'suggested_stake': value.get('suggested_stake', 0) * 100,
+                    'confidence': value.get('confidence', 0)
+                }
+            else:
+                value_bet_analysis = {
+                    'has_value': False
+                }
+
+            # Generate PDF
+            pdf_path = pdf_gen.generate_match_report(
+                fixture_data=fixture,
+                api_football_analysis=api_football_analysis,
+                poisson_analysis=poisson_analysis,
+                footystats_analysis=footystats_analysis,
+                value_bet_analysis=value_bet_analysis
+            )
+
+            logger.info(f"PDF generated successfully: {pdf_path}")
+            return pdf_path
+
+        except Exception as e:
+            logger.error(f"Error generating PDF: {e}", exc_info=True)
+            raise

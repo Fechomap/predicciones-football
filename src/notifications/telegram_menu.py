@@ -173,7 +173,7 @@ class TelegramMenu:
         # Use BD-first approach via fixtures_service
         fixtures = await asyncio.to_thread(
             self.bot_service.fixtures_service.get_upcoming_fixtures,
-            hours_ahead=168,
+            hours_ahead=360,  # 15 días
             force_refresh=force_refresh
         )
 
@@ -227,7 +227,10 @@ class TelegramMenu:
             InlineKeyboardMarkup with actions
         """
         keyboard = [
-            [InlineKeyboardButton("📊 Analizar Partido", callback_data=f"analyze_{fixture_id}")],
+            [InlineKeyboardButton("🤖 API-Football (AI)", callback_data=f"analyze_apifootball_{fixture_id}")],
+            [InlineKeyboardButton("🧮 Análisis Poisson", callback_data=f"analyze_poisson_{fixture_id}")],
+            [InlineKeyboardButton("📈 FootyStats (Datos)", callback_data=f"analyze_footystats_{fixture_id}")],
+            [InlineKeyboardButton("📊 Análisis Completo", callback_data=f"analyze_{fixture_id}")],
             [InlineKeyboardButton("🔄 Actualizar Datos", callback_data=f"refresh_{fixture_id}")],
             [InlineKeyboardButton("🔙 Volver a Partidos", callback_data="back_to_fixtures")],
             [InlineKeyboardButton("🏠 Menú Principal", callback_data="back_to_sports")]
@@ -310,7 +313,7 @@ Selecciona la liga que deseas consultar:
         # Get all fixtures (uses BD cache)
         fixtures = await asyncio.to_thread(
             self.bot_service.fixtures_service.get_upcoming_fixtures,
-            hours_ahead=168,
+            hours_ahead=360,  # 15 días
             force_refresh=False
         )
 

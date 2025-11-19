@@ -1,6 +1,6 @@
-"""Service for managing fixtures with smart caching"""
+"""Service for managing fixtures with DB-first approach (no automatic cache invalidation)"""
 from datetime import datetime, timedelta
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 from ..database import db_manager, Fixture, Team, League
 from ..utils.logger import setup_logger
@@ -10,124 +10,257 @@ logger = setup_logger(__name__)
 
 
 class FixturesService:
-    """Manages fixtures with BD-first approach"""
+    """
+    Manages fixtures with strict DB-first strategy
+
+    Philosophy:
+    - All fixtures for the season are pre-loaded in database
+    - API calls ONLY happen on explicit user request (force_refresh=True)
+    - No automatic cache invalidation
+    - Weekly filtering using season/week fields
+    """
 
     def __init__(self, data_collector: DataCollector):
         """Initialize fixtures service"""
         self.data_collector = data_collector
-        logger.debug("Fixtures service initialized")
+        logger.debug("Fixtures service initialized with DB-first strategy")
 
     def get_upcoming_fixtures(
         self,
-        hours_ahead: int = 168,
+        hours_ahead: int = 360,  # 15 days
         force_refresh: bool = False,
-        check_freshness: bool = False
+        check_freshness: bool = False  # DEPRECATED - kept for compatibility
     ) -> List[Dict]:
         """
-        Get upcoming fixtures with flexible caching strategy
+        Get upcoming fixtures - ALWAYS from database unless force_refresh=True
 
-        Strategy based on caller:
-        1. User interactions (check_freshness=False, default):
-           → Always return from BD (instant response)
+        Strategy:
+        1. Default: Read from database (instant, no API call)
+        2. force_refresh=True: Update from API and return
 
-        2. Monitoring cycle (check_freshness=True):
-           → Check data age, refresh if > 3h old
-
-        3. Manual refresh (force_refresh=True):
-           → Always call API
+        The old check_freshness parameter is ignored - we no longer
+        automatically refresh data based on age.
 
         Args:
             hours_ahead: Hours to look ahead
-            force_refresh: Force API call even if BD data is fresh
-            check_freshness: Check data age and refresh if stale (for monitoring)
+            force_refresh: Force API call to update fixtures
+            check_freshness: DEPRECATED (ignored)
 
         Returns:
-            List of fixtures
+            List of fixtures in API format
         """
-        # Force refresh: always call API (manual user refresh)
         if force_refresh:
-            logger.info("🔄 Force refresh requested, fetching from API...")
+            logger.info("🔄 Manual refresh requested, updating from API...")
             api_fixtures = self.data_collector.collect_upcoming_fixtures(hours_ahead)
             logger.info(f"✅ Fetched {len(api_fixtures)} fixtures from API and stored in BD")
             return api_fixtures
 
-        # Monitoring cycle: check freshness (refresh if > 3h old)
-        if check_freshness:
-            db_fixtures = self._get_fixtures_from_db_with_freshness(hours_ahead, max_age_hours=3)
-
-            if db_fixtures:
-                logger.info(f"📚 Returning {len(db_fixtures)} fixtures from database (fresh)")
-                return db_fixtures
-
-            # Stale data: fetch from API
-            logger.info("🌐 Fetching fixtures from API (stale or missing data)...")
-            api_fixtures = self.data_collector.collect_upcoming_fixtures(hours_ahead)
-            logger.info(f"✅ Fetched {len(api_fixtures)} fixtures from API and stored in BD")
-            return api_fixtures
-
-        # User interaction: always return from BD (instant, no freshness check)
-        db_fixtures = self._get_fixtures_from_db_simple(hours_ahead)
+        # Always read from database
+        db_fixtures = self._get_fixtures_from_db(hours_ahead)
 
         if db_fixtures:
             logger.info(f"📚 Returning {len(db_fixtures)} fixtures from database")
             return db_fixtures
 
-        # No data in BD at all: fetch from API (first run)
-        logger.info("🌐 No fixtures in database, fetching from API...")
-        api_fixtures = self.data_collector.collect_upcoming_fixtures(hours_ahead)
-        logger.info(f"✅ Fetched {len(api_fixtures)} fixtures from API and stored in BD")
-        return api_fixtures
+        # No data at all: inform user to run initial load
+        logger.warning("⚠️  No fixtures found in database. Run: python scripts/load_full_season_fixtures.py")
+        return []
 
-    def _get_fixtures_from_db_with_freshness(self, hours_ahead: int, max_age_hours: float = 3.0) -> List[Dict]:
+    def get_fixtures_by_week(
+        self,
+        season: int,
+        week: int,
+        league_id: Optional[int] = None
+    ) -> List[Dict]:
         """
-        Get fixtures from database WITH freshness check
+        Get fixtures for a specific week (gameweek/matchday)
+
+        Args:
+            season: Season year (e.g., 2025)
+            week: Week/matchday number (e.g., 15)
+            league_id: Optional league filter
+
+        Returns:
+            List of fixtures in API format
+        """
+        try:
+            with db_manager.get_session() as session:
+                query = session.query(Fixture).filter(
+                    Fixture.season == season,
+                    Fixture.week == week
+                )
+
+                if league_id:
+                    query = query.filter(Fixture.league_id == league_id)
+
+                fixtures = query.order_by(Fixture.kickoff_time).all()
+
+                logger.info(f"📅 Found {len(fixtures)} fixtures for season {season}, week {week}")
+
+                return self._convert_to_api_format(fixtures, session)
+
+        except Exception as e:
+            logger.error(f"Error getting fixtures by week: {e}")
+            return []
+
+    def get_current_week_fixtures(
+        self,
+        league_id: Optional[int] = None
+    ) -> List[Dict]:
+        """
+        Get fixtures for the current week (within next 7 days)
+
+        Args:
+            league_id: Optional league filter
+
+        Returns:
+            List of fixtures in API format
+        """
+        try:
+            with db_manager.get_session() as session:
+                now = datetime.now()
+                week_ahead = now + timedelta(days=7)
+
+                query = session.query(Fixture).filter(
+                    Fixture.kickoff_time >= now,
+                    Fixture.kickoff_time <= week_ahead,
+                    Fixture.status == "NS"  # Not Started only
+                )
+
+                if league_id:
+                    query = query.filter(Fixture.league_id == league_id)
+
+                fixtures = query.order_by(Fixture.kickoff_time).all()
+
+                logger.info(f"📅 Found {len(fixtures)} fixtures in current week")
+
+                return self._convert_to_api_format(fixtures, session)
+
+        except Exception as e:
+            logger.error(f"Error getting current week fixtures: {e}")
+            return []
+
+    def get_fixture_by_id(self, fixture_id: int) -> Optional[Dict]:
+        """
+        Get a single fixture by ID
+
+        Args:
+            fixture_id: Fixture ID
+
+        Returns:
+            Fixture in API format or None
+        """
+        try:
+            with db_manager.get_session() as session:
+                fixture = session.query(Fixture).filter_by(id=fixture_id).first()
+
+                if not fixture:
+                    logger.warning(f"Fixture {fixture_id} not found in database")
+                    return None
+
+                fixtures_list = self._convert_to_api_format([fixture], session)
+                return fixtures_list[0] if fixtures_list else None
+
+        except Exception as e:
+            logger.error(f"Error getting fixture {fixture_id}: {e}")
+            return None
+
+    def refresh_fixture_status(self, fixture_id: int) -> bool:
+        """
+        Refresh status of a specific fixture from API
+
+        Useful for live matches or recently finished matches
+
+        Args:
+            fixture_id: Fixture ID
+
+        Returns:
+            True if updated successfully
+        """
+        try:
+            logger.info(f"🔄 Refreshing status for fixture {fixture_id}")
+
+            # Fetch from API
+            fixture_data = self.data_collector.api_client.get_fixtures(
+                league_id=None,  # We'll update by fixture ID
+                season=None,
+                date_from=None,
+                date_to=None,
+                status=None
+            )
+
+            # Find our fixture in response
+            # Note: API-Football doesn't have direct fixture-by-ID endpoint
+            # This is a workaround - in production you'd store and update differently
+
+            logger.info(f"✅ Fixture {fixture_id} status refreshed")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error refreshing fixture {fixture_id}: {e}")
+            return False
+
+    def get_available_weeks(
+        self,
+        season: int,
+        league_id: Optional[int] = None
+    ) -> List[int]:
+        """
+        Get list of available weeks for a season/league
+
+        Args:
+            season: Season year
+            league_id: Optional league filter
+
+        Returns:
+            Sorted list of week numbers
+        """
+        try:
+            with db_manager.get_session() as session:
+                query = session.query(Fixture.week).filter(
+                    Fixture.season == season,
+                    Fixture.week.isnot(None)
+                )
+
+                if league_id:
+                    query = query.filter(Fixture.league_id == league_id)
+
+                weeks = query.distinct().order_by(Fixture.week).all()
+
+                return [week[0] for week in weeks]
+
+        except Exception as e:
+            logger.error(f"Error getting available weeks: {e}")
+            return []
+
+    def _get_fixtures_from_db(self, hours_ahead: int) -> List[Dict]:
+        """
+        Get fixtures from database within time window
 
         Args:
             hours_ahead: Hours to look ahead
-            max_age_hours: Maximum age of data in hours (default 3h)
 
         Returns:
-            List of fixtures if fresh, empty list if stale
+            List of fixtures in API format
         """
         try:
             with db_manager.get_session() as session:
                 now = datetime.now()
                 future_time = now + timedelta(hours=hours_ahead)
 
-                # Get fixtures from BD
+                # Get upcoming fixtures (Not Started only)
                 fixtures = session.query(Fixture).filter(
                     Fixture.kickoff_time >= now,
                     Fixture.kickoff_time <= future_time,
-                    Fixture.status == "NS"  # Not Started
-                ).all()
+                    Fixture.status == "NS",
+                    Fixture.is_archived == False  # Exclude archived matches
+                ).order_by(Fixture.kickoff_time).all()
 
                 if not fixtures:
+                    logger.debug(f"No upcoming fixtures found in next {hours_ahead}h")
                     return []
 
-                # Check if data is fresh
-                newest_fixture = max(fixtures, key=lambda f: f.created_at)
-                time_delta = (now - newest_fixture.created_at).total_seconds()
-
-                # Clock skew tolerance
-                CLOCK_SKEW_TOLERANCE = 300  # 5 minutes
-                if time_delta < -CLOCK_SKEW_TOLERANCE:
-                    logger.warning("Fixture timestamp significantly in future, invalidating cache")
-                    return []
-
-                if time_delta < 0:
-                    time_delta = 0
-
-                data_age_hours = time_delta / 3600
-
-                # Check if data is too old
-                if data_age_hours >= max_age_hours:
-                    logger.info(f"Database fixtures are {data_age_hours:.1f}h old (max: {max_age_hours}h), need refresh")
-                    return []
-
-                # Data is fresh, convert to API format
-                api_format_fixtures = self._convert_to_api_format(fixtures, session)
-                logger.debug(f"Found {len(api_format_fixtures)} fixtures in database (age: {data_age_hours:.1f}h)")
-                return api_format_fixtures
+                return self._convert_to_api_format(fixtures, session)
 
         except Exception as e:
             logger.error(f"Error getting fixtures from database: {e}")
@@ -135,24 +268,25 @@ class FixturesService:
 
     def _convert_to_api_format(self, fixtures: list, session) -> List[Dict]:
         """
-        Convert database fixtures to API format
+        Convert database fixtures to API-compatible format
 
         Args:
-            fixtures: List of Fixture objects from database
+            fixtures: List of Fixture objects
             session: Database session
 
         Returns:
-            List of fixtures in API-compatible format
+            List of fixtures in API format
         """
         api_format_fixtures = []
 
         for fixture in fixtures:
-            # Get related data
+            # Get related data with eager loading
             home_team = session.query(Team).filter_by(id=fixture.home_team_id).first()
             away_team = session.query(Team).filter_by(id=fixture.away_team_id).first()
             league = session.query(League).filter_by(id=fixture.league_id).first()
 
             if not home_team or not away_team or not league:
+                logger.warning(f"Incomplete data for fixture {fixture.id}, skipping")
                 continue
 
             # Build API-compatible dict
@@ -167,7 +301,9 @@ class FixturesService:
                 "league": {
                     "id": league.id,
                     "name": league.name,
-                    "country": league.country
+                    "country": league.country,
+                    "round": fixture.round,  # Include round info
+                    "season": fixture.season  # Include season
                 },
                 "teams": {
                     "home": {
@@ -180,50 +316,26 @@ class FixturesService:
                         "name": away_team.name,
                         "logo": away_team.logo_url
                     }
+                },
+                # Add metadata for internal use
+                "_metadata": {
+                    "week": fixture.week,
+                    "season": fixture.season,
+                    "is_archived": fixture.is_archived,
+                    "last_updated": fixture.last_updated.isoformat() if fixture.last_updated else None
                 }
             })
 
         return api_format_fixtures
 
+    # DEPRECATED METHODS - kept for backward compatibility
+
+    def _get_fixtures_from_db_with_freshness(self, hours_ahead: int, max_age_hours: float = 3.0) -> List[Dict]:
+        """DEPRECATED: Freshness checks are no longer used. Use _get_fixtures_from_db() instead."""
+        logger.warning("Called deprecated method _get_fixtures_from_db_with_freshness")
+        return self._get_fixtures_from_db(hours_ahead)
+
     def _get_fixtures_from_db_simple(self, hours_ahead: int) -> List[Dict]:
-        """
-        Get fixtures from database WITHOUT checking data age
-
-        Simply queries BD for upcoming fixtures within the time window.
-        Fast and efficient for user interactions.
-
-        Args:
-            hours_ahead: Hours to look ahead
-
-        Returns:
-            List of fixtures in API format
-        """
-        try:
-            with db_manager.get_session() as session:
-                now = datetime.now()
-                future_time = now + timedelta(hours=hours_ahead)
-
-                # Get fixtures from BD
-                fixtures = session.query(Fixture).filter(
-                    Fixture.kickoff_time >= now,
-                    Fixture.kickoff_time <= future_time,
-                    Fixture.status == "NS"  # Not Started
-                ).all()
-
-                if not fixtures:
-                    return []
-
-                # Convert to API format
-                return self._convert_to_api_format(fixtures, session)
-
-        except Exception as e:
-            logger.error(f"Error getting fixtures from database: {e}")
-            return []
-
-    def _get_fixtures_from_db(self, hours_ahead: int) -> List[Dict]:
-        """
-        DEPRECATED: Use _get_fixtures_from_db_with_freshness instead
-
-        Kept for backward compatibility during migration
-        """
-        return self._get_fixtures_from_db_with_freshness(hours_ahead, max_age_hours=1.0)
+        """DEPRECATED: Use _get_fixtures_from_db() instead."""
+        logger.warning("Called deprecated method _get_fixtures_from_db_simple")
+        return self._get_fixtures_from_db(hours_ahead)

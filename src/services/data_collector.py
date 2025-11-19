@@ -40,7 +40,7 @@ class DataCollector:
 
             session.commit()
 
-    def collect_upcoming_fixtures(self, hours_ahead: int = 72) -> List[Dict]:
+    def collect_upcoming_fixtures(self, hours_ahead: int = 360) -> List[Dict]:  # 15 días
         """
         Collect upcoming fixtures from API
 

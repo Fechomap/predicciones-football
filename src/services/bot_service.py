@@ -4,11 +4,13 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Dict
 
 from ..api import APIFootballClient
+from ..api.footystats_client import FootyStatsClient
 from ..database import (
     db_manager, Fixture, Prediction, ValueBet,
     NotificationLog, TeamStatistics
 )
 from ..analyzers import PoissonAnalyzer, FormAnalyzer, ValueDetector
+from ..analyzers.enhanced_analyzer import EnhancedAnalyzer
 from ..notifications import TelegramNotifier
 from ..utils.config import Config
 from ..utils.logger import setup_logger
@@ -24,6 +26,7 @@ class BotService:
     def __init__(self):
         """Initialize bot service"""
         self.api_client = APIFootballClient()
+        self.footystats_client = FootyStatsClient()
         self.data_collector = DataCollector()
         self.fixtures_service = FixturesService(self.data_collector)
         self.telegram = TelegramNotifier()
@@ -32,9 +35,14 @@ class BotService:
         self.form_analyzer = FormAnalyzer()
         self.value_detector = ValueDetector()
 
+        # Initialize team mapping service and enhanced analyzer
+        from .team_mapping_service import TeamMappingService
+        self.team_mapping_service = TeamMappingService()  # No longer needs footystats_client
+        self.enhanced_analyzer = EnhancedAnalyzer(self.footystats_client, self.team_mapping_service)
+
         self.alerts_sent_today = 0
 
-        logger.info("Bot service initialized")
+        logger.info("Bot service initialized with FootyStats integration")
 
     async def check_fixtures(self):
         """Main task: Check upcoming fixtures and analyze"""
@@ -177,6 +185,27 @@ class BotService:
             expected_away
         )
 
+        # ENHANCED: Get FootyStats quality analysis
+        footystats_analysis = None
+        try:
+            logger.info("Fetching FootyStats enhanced metrics...")
+            footystats_analysis = self.enhanced_analyzer.analyze_match_quality(
+                home_team_id=home_team_id,
+                away_team_id=away_team_id,
+                home_team_name=teams.get('home', {}).get('name', 'Unknown'),
+                away_team_name=teams.get('away', {}).get('name', 'Unknown'),
+                league_id=league_id  # CRITICAL: Pass league for precise search
+            )
+            if footystats_analysis:
+                logger.info(
+                    f"FootyStats Quality Score: {footystats_analysis.get('quality_score', 0)}, "
+                    f"BTTS Prob: {footystats_analysis.get('btts_probability', 0):.2%}"
+                )
+            else:
+                logger.info("FootyStats data not available for this match")
+        except Exception as e:
+            logger.warning(f"FootyStats analysis failed (continuing with base prediction): {e}")
+
         # Get REAL form analysis from recent matches
         logger.info(f"Calculating real form for teams {home_team_id} vs {away_team_id}")
 
@@ -274,8 +303,10 @@ class BotService:
                     "home_form": home_form,
                     "away_form": away_form,
                     "goal_ranges": goal_ranges,
+                    "footystats": footystats_analysis,  # Add FootyStats data
                     "confidence": self.value_detector.get_confidence_rating(
-                        value_result["edge"]
+                        value_result["edge"],
+                        footystats_quality=footystats_analysis.get('quality_score', 50) if footystats_analysis else 50
                     )
                 }
 
@@ -713,6 +744,26 @@ class BotService:
                 expected_away
             )
 
+            # ENHANCED: Get FootyStats quality analysis
+            footystats_analysis = None
+            try:
+                logger.info("Fetching FootyStats enhanced metrics...")
+                footystats_analysis = self.enhanced_analyzer.analyze_match_quality(
+                    home_team_id=home_team_id,
+                    away_team_id=away_team_id,
+                    home_team_name=teams.get('home', {}).get('name', 'Unknown'),
+                    away_team_name=teams.get('away', {}).get('name', 'Unknown')
+                )
+                if footystats_analysis:
+                    logger.info(
+                        f"FootyStats Quality Score: {footystats_analysis.get('quality_score', 0)}, "
+                        f"BTTS Prob: {footystats_analysis.get('btts_probability', 0):.2%}"
+                    )
+                else:
+                    logger.info("FootyStats data not available for this match")
+            except Exception as e:
+                logger.warning(f"FootyStats analysis failed (continuing with base prediction): {e}")
+
             # Get odds (MUST have real odds - no mocks in production)
             logger.info(f"📊 Fetching odds for fixture {fixture_id}")
             odds_data = self.data_collector.collect_fixture_odds(fixture_id)
@@ -877,6 +928,7 @@ class BotService:
                     "away_matches": away_stats.get("away_matches", 0)
                 },
                 "goal_ranges": goal_ranges,
+                "footystats": footystats_analysis,  # Add FootyStats data
                 "h2h": {
                     "last_5": api_predictions.get("h2h", [])[:5] if "h2h" in api_predictions else []
                 },
@@ -885,6 +937,158 @@ class BotService:
 
         except Exception as e:
             logger.error(f"Error analyzing fixture {fixture_id}: {e}")
+            return None
+
+    def analyze_fixture_apifootball(self, fixture: Dict) -> Dict:
+        """
+        Analyze fixture using ONLY API-Football predictions
+
+        Args:
+            fixture: Fixture data
+
+        Returns:
+            API-Football analysis only
+        """
+        try:
+            fixture_id = fixture.get("fixture", {}).get("id")
+            teams = fixture.get("teams", {})
+
+            logger.info("Fetching API-Football predictions...")
+            api_predictions_raw = self.api_client.get_predictions(fixture_id)
+
+            if isinstance(api_predictions_raw, list) and len(api_predictions_raw) > 0:
+                api_predictions = api_predictions_raw[0]
+            elif isinstance(api_predictions_raw, dict):
+                api_predictions = api_predictions_raw
+            else:
+                api_predictions = {}
+
+            api_pred = api_predictions.get("predictions", {})
+            api_percent = api_pred.get("percent", {}) if api_pred else {}
+
+            return {
+                "source": "api_football",
+                "teams": teams,
+                "fixture_info": fixture.get("fixture", {}),
+                "league": fixture.get("league", {}),
+                "predictions": api_pred,
+                "percent": api_percent,
+                "h2h": api_predictions.get("h2h", [])[:5] if "h2h" in api_predictions else [],
+                "comparison": api_predictions.get("comparison", {})
+            }
+
+        except Exception as e:
+            logger.error(f"Error in API-Football analysis: {e}")
+            return None
+
+    def analyze_fixture_poisson(self, fixture: Dict) -> Dict:
+        """
+        Analyze fixture using ONLY Poisson model
+
+        Args:
+            fixture: Fixture data
+
+        Returns:
+            Poisson analysis only
+        """
+        try:
+            teams = fixture.get("teams", {})
+            home_team_id = teams.get("home", {}).get("id")
+            away_team_id = teams.get("away", {}).get("id")
+            league_id = fixture.get("league", {}).get("id")
+
+            # Get team stats
+            home_stats = self._get_team_stats(home_team_id, league_id, is_home=True)
+            away_stats = self._get_team_stats(away_team_id, league_id, is_home=False)
+
+            # Calculate expected goals
+            expected_home, expected_away = self.poisson_analyzer.calculate_expected_goals(
+                home_stats,
+                away_stats,
+                league_id=league_id
+            )
+
+            # Calculate probabilities
+            probabilities = self.poisson_analyzer.calculate_match_probabilities(
+                expected_home,
+                expected_away
+            )
+
+            # Goal ranges
+            goal_ranges = self.poisson_analyzer.calculate_goal_ranges_probabilities(
+                expected_home,
+                expected_away
+            )
+
+            # Get odds for value bet detection
+            fixture_id = fixture.get("fixture", {}).get("id")
+            odds_data = self.data_collector.collect_fixture_odds(fixture_id)
+            best_odds = self._extract_best_odds(odds_data) if odds_data else {}
+
+            return {
+                "source": "poisson",
+                "teams": teams,
+                "fixture_info": fixture.get("fixture", {}),
+                "league": fixture.get("league", {}),
+                "probabilities": probabilities,
+                "expected_goals": {
+                    "home": expected_home,
+                    "away": expected_away
+                },
+                "goal_ranges": goal_ranges,
+                "best_odds": best_odds,
+                "has_odds": bool(best_odds)
+            }
+
+        except Exception as e:
+            logger.error(f"Error in Poisson analysis: {e}")
+            return None
+
+    def analyze_fixture_footystats(self, fixture: Dict) -> Dict:
+        """
+        Analyze fixture using ONLY FootyStats data
+
+        Args:
+            fixture: Fixture data
+
+        Returns:
+            FootyStats analysis only
+        """
+        try:
+            teams = fixture.get("teams", {})
+            home_team_id = teams.get("home", {}).get("id")
+            away_team_id = teams.get("away", {}).get("id")
+            home_team_name = teams.get("home", {}).get("name", "Unknown")
+            away_team_name = teams.get("away", {}).get("name", "Unknown")
+
+            logger.info("Fetching FootyStats data...")
+            league_id = fixture.get("league", {}).get("id")
+            footystats_analysis = self.enhanced_analyzer.analyze_match_quality(
+                home_team_id=home_team_id,
+                away_team_id=away_team_id,
+                home_team_name=home_team_name,
+                away_team_name=away_team_name,
+                league_id=league_id  # CRITICAL: Pass league for precise search
+            )
+
+            if not footystats_analysis:
+                return {
+                    "source": "footystats",
+                    "available": False,
+                    "message": "Datos de FootyStats no disponibles para estos equipos"
+                }
+
+            return {
+                "source": "footystats",
+                "available": True,
+                "teams": teams,
+                "fixture_info": fixture.get("fixture", {}),
+                "league": fixture.get("league", {}),
+                "analysis": footystats_analysis
+            }
+
+        except Exception as e:
+            logger.error(f"Error in FootyStats analysis: {e}")
             return None
 
     def sync_leagues(self):

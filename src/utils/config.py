@@ -21,6 +21,13 @@ class Config(BaseSettings):
         description="API-Football host"
     )
 
+    # FootyStats API
+    FOOTYSTATS_API_KEY: str = Field(..., description="FootyStats API key")
+    FOOTYSTATS_BASE_URL: str = Field(
+        default="https://api.footystats.org",
+        description="FootyStats API base URL"
+    )
+
     # Telegram
     TELEGRAM_BOT_TOKEN: str = Field(..., description="Telegram bot token")
     TELEGRAM_CHAT_ID: str = Field(..., description="Telegram chat ID")

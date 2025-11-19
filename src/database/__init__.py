@@ -8,7 +8,9 @@ from .models import (
     OddsHistory,
     Prediction,
     ValueBet,
-    NotificationLog
+    NotificationLog,
+    LeagueIDMapping,
+    TeamIDMapping
 )
 from .connection import DatabaseManager, db_manager
 
@@ -22,6 +24,8 @@ __all__ = [
     "Prediction",
     "ValueBet",
     "NotificationLog",
+    "LeagueIDMapping",
+    "TeamIDMapping",
     "DatabaseManager",
     "db_manager"
 ]
