@@ -674,40 +674,29 @@ Stake sugerido: {value.get('suggested_stake', 0)*100:.0f}% del bankroll
 ⭐⭐⭐ Media confianza: {summary['medium_confidence']} partidos
 ⭐⭐ Baja confianza: {summary['low_confidence']} partidos
 
-💡 <b>Recomendación:</b> Revisar los primeros 3-5 partidos del PDF
+💡 <b>Recomendación:</b> El PDF contiene el análisis COMPLETO de TODOS los partidos.
+Los primeros 5-10 partidos (fondo verde) son las mejores oportunidades.
 """
 
             await update.callback_query.edit_message_text(message, parse_mode="HTML")
 
-            # Enviar PDF
+            # Enviar PDF con análisis completo
             with open(pdf_path, 'rb') as pdf_file:
                 await update.callback_query.message.reply_document(
                     document=pdf_file,
                     filename=f"{result['league_name']}_resumen.pdf",
-                    caption="📄 Resumen semanal de la liga"
-                )
-
-            # Botones con top 3 partidos
-            if result['top_3']:
-                top_keyboard = []
-                for i, item in enumerate(result['top_3'], 1):
-                    fixture = item['fixture']
-                    teams = fixture.get('teams', {})
-                    stars = '⭐' * item['confidence']
-
-                    home = teams.get('home', {}).get('name', '')
-                    away = teams.get('away', {}).get('name', '')
-                    fixture_id = fixture.get('fixture', {}).get('id')
-
-                    top_keyboard.append([InlineKeyboardButton(
-                        f"{stars} {home} vs {away}",
-                        callback_data=f"fixture_{fixture_id}"
-                    )])
-
-                await update.callback_query.message.reply_text(
-                    "🎯 <b>Top 3 partidos con mayor confianza:</b>",
-                    parse_mode="HTML",
-                    reply_markup=InlineKeyboardMarkup(top_keyboard)
+                    caption=f"📊 ANÁLISIS COMPLETO DE {result['league_name'].upper()}\n\n"
+                            f"✅ Página 1: Tabla resumen de todos los partidos\n"
+                            f"✅ Páginas 2+: Análisis detallado partido por partido\n\n"
+                            f"📋 Cada partido incluye:\n"
+                            f"• Predicción API-Football\n"
+                            f"• Predicción Poisson (nuestro modelo)\n"
+                            f"• Comparación de modelos\n"
+                            f"• Forma de equipos (últimos 5 partidos)\n"
+                            f"• Datos FootyStats (si disponible)\n"
+                            f"• Value Bet detectado\n"
+                            f"• Recomendación final con estrellas\n\n"
+                            f"📈 Ordenados por confianza: Mejores oportunidades primero"
                 )
 
         except Exception as e:

@@ -230,6 +230,9 @@ def map_all_teams_to_footystats():
     logger.warning("⚠️  This function is deprecated. Use scripts/auto_map_all_teams.py instead")
     return
 
+    # Initialize mapping service (fixes F821 bug even though code is unreachable)
+    mapping_service = TeamMappingService()
+
     with db_manager.get_session() as session:
         teams = session.query(Team).all()
         logger.info(f"Found {len(teams)} teams to map")

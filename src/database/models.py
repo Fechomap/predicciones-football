@@ -253,6 +253,25 @@ class TeamIDMapping(Base):
         return f"<TeamIDMapping {self.team_name} API:{self.api_football_id} FS:{self.footystats_id}>"
 
 
+class PendingMapping(Base):
+    """Pending team mappings for manual review (confidence < 95%)"""
+    __tablename__ = "pending_mappings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    api_football_id = Column(Integer, nullable=False, index=True)
+    team_name = Column(String(100), nullable=False)
+    suggested_footystats_id = Column(Integer, nullable=True)
+    suggested_footystats_name = Column(String(100), nullable=True)
+    confidence = Column(Numeric(5, 2), nullable=False)  # 0-100 confidence score
+    league_id = Column(Integer, ForeignKey("league_id_mapping.api_football_id"), nullable=True)
+    status = Column(String(20), default='pending')  # pending, approved, rejected
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<PendingMapping {self.team_name} API:{self.api_football_id} ({self.confidence:.1f}% confidence)>"
+
+
 class AnalysisHistory(Base):
     """Historical analysis reports with PDF storage"""
     __tablename__ = "analysis_history"

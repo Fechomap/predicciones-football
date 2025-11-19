@@ -18,7 +18,7 @@ from difflib import SequenceMatcher
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.database.connection import db_manager
-from src.database.models import Team, TeamIDMapping
+from src.database.models import Team, TeamIDMapping, PendingMapping
 from src.api.footystats_client import FootyStatsClient
 from src.utils.config import Config
 import logging
@@ -178,59 +178,85 @@ def analyze_league_mappings(league_id: int, dry_run: bool = True):
 
 def save_mappings(mappings: list):
     """
-    Save mappings to database (SOLO confianza ≥95%)
+    Save mappings to database
 
-    CAMBIO CRÍTICO:
-    - Solo guarda mapeos con confidence_score >= 0.95
-    - Mapeos <95% se ignoran (evita contaminar BD)
+    LÓGICA (según especificación PM):
+    - Confianza ≥95%: Guardar en TeamIDMapping (alta confianza)
+    - Confianza <95%: Guardar en PendingMapping (revisión manual)
     """
-    SAVE_THRESHOLD = 0.95  # Solo guardar alta confianza
+    SAVE_THRESHOLD = 0.95  # Umbral de confianza
 
     saved_count = 0
-    skipped_count = 0
+    pending_count = 0
 
     with db_manager.get_session() as session:
         for mapping in mappings:
-            # CRÍTICO: Solo guardar si confianza >= 95%
-            if mapping['confidence'] < SAVE_THRESHOLD:
-                logger.debug(
-                    f"⚠️  Skipping {mapping['api_name']} (confidence: {mapping['confidence']:.1%} < {SAVE_THRESHOLD:.0%})"
-                )
-                skipped_count += 1
-                continue
+            # ALTA CONFIANZA (≥95%): Guardar en TeamIDMapping
+            if mapping['confidence'] >= SAVE_THRESHOLD:
+                # Check if mapping exists
+                existing = session.query(TeamIDMapping).filter_by(
+                    api_football_id=mapping['api_id']
+                ).first()
 
-            # Check if mapping exists
-            existing = session.query(TeamIDMapping).filter_by(
-                api_football_id=mapping['api_id']
-            ).first()
+                if existing:
+                    # Update existing
+                    existing.footystats_id = mapping['fs_id']
+                    existing.team_name = mapping['api_name']
+                    existing.league_id = mapping['league_id']
+                    existing.confidence_score = mapping['confidence']
+                    existing.is_verified = True  # Auto-verify ≥95%
+                    logger.info(f"✅ Saved (High): {mapping['api_name']} ({mapping['confidence']:.1%})")
+                else:
+                    # Create new
+                    new_mapping = TeamIDMapping(
+                        api_football_id=mapping['api_id'],
+                        footystats_id=mapping['fs_id'],
+                        team_name=mapping['api_name'],
+                        league_id=mapping['league_id'],
+                        confidence_score=mapping['confidence'],
+                        is_verified=True  # Auto-verify ≥95%
+                    )
+                    session.add(new_mapping)
+                    logger.info(f"✅ Saved (High): {mapping['api_name']} ({mapping['confidence']:.1%})")
 
-            if existing:
-                # Update existing (solo si nueva confianza es alta)
-                existing.footystats_id = mapping['fs_id']
-                existing.team_name = mapping['api_name']
-                existing.league_id = mapping['league_id']
-                existing.confidence_score = mapping['confidence']
-                existing.is_verified = True  # Auto-verify ≥95%
-                logger.info(f"🔄 Updated: {mapping['api_name']} ({mapping['confidence']:.1%})")
+                saved_count += 1
+
+            # BAJA CONFIANZA (<95%): Guardar en PendingMapping para revisión manual
             else:
-                # Create new (solo confianza alta)
-                new_mapping = TeamIDMapping(
-                    api_football_id=mapping['api_id'],
-                    footystats_id=mapping['fs_id'],
-                    team_name=mapping['api_name'],
-                    league_id=mapping['league_id'],
-                    confidence_score=mapping['confidence'],
-                    is_verified=True  # Auto-verify ≥95%
-                )
-                session.add(new_mapping)
-                logger.info(f"✅ Created: {mapping['api_name']} ({mapping['confidence']:.1%})")
+                # Check if already exists in pending
+                existing_pending = session.query(PendingMapping).filter_by(
+                    api_football_id=mapping['api_id']
+                ).first()
 
-            saved_count += 1
+                if existing_pending:
+                    # Update existing pending
+                    existing_pending.team_name = mapping['api_name']
+                    existing_pending.suggested_footystats_id = mapping['fs_id']
+                    existing_pending.suggested_footystats_name = mapping['fs_name']
+                    existing_pending.confidence = mapping['confidence'] * 100  # Store as 0-100
+                    existing_pending.league_id = mapping['league_id']
+                    logger.warning(f"⚠️  Updated Pending: {mapping['api_name']} ({mapping['confidence']:.1%})")
+                else:
+                    # Create new pending
+                    pending_mapping = PendingMapping(
+                        api_football_id=mapping['api_id'],
+                        team_name=mapping['api_name'],
+                        suggested_footystats_id=mapping['fs_id'],
+                        suggested_footystats_name=mapping['fs_name'],
+                        confidence=mapping['confidence'] * 100,  # Store as 0-100
+                        league_id=mapping['league_id'],
+                        status='pending'
+                    )
+                    session.add(pending_mapping)
+                    logger.warning(f"⚠️  Sent to Review: {mapping['api_name']} ({mapping['confidence']:.1%})")
+
+                pending_count += 1
 
         session.commit()
 
-        logger.info(f"\n💾 Guardados: {saved_count} mapeos de alta confianza")
-        logger.info(f"⚠️  Omitidos: {skipped_count} mapeos de baja confianza")
+        logger.info(f"\n💾 RESUMEN:")
+        logger.info(f"  ✅ Guardados automáticamente (≥95%): {saved_count}")
+        logger.info(f"  ⚠️  Enviados a revisión manual (<95%): {pending_count}")
 
 
 def main():
