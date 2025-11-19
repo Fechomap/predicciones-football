@@ -157,13 +157,14 @@ class TelegramMenu:
 
         return InlineKeyboardMarkup(keyboard)
 
-    async def get_fixtures_menu(self, league_id: int, force_refresh: bool = False) -> InlineKeyboardMarkup:
+    async def get_fixtures_menu(self, league_id: int, force_refresh: bool = False, page: int = 1) -> InlineKeyboardMarkup:
         """
         Get fixtures menu for a specific league
 
         Args:
             league_id: League ID
             force_refresh: Force API call even if BD has data
+            page: Página actual (default: 1)
 
         Returns:
             InlineKeyboardMarkup with fixtures
@@ -180,13 +181,24 @@ class TelegramMenu:
         # Filter by league
         league_fixtures = [f for f in fixtures if f.get("league", {}).get("id") == league_id]
 
+        # Paginación: 10 partidos por página
+        per_page = 10
+
+        total_fixtures = len(league_fixtures)
+        total_pages = (total_fixtures + per_page - 1) // per_page
+
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+
+        fixtures_page = league_fixtures[start_idx:end_idx]
+
         keyboard = []
 
         if not league_fixtures:
             keyboard.append([InlineKeyboardButton("😕 No hay partidos esta semana", callback_data="no_fixtures")])
         else:
-            # Show up to 15 fixtures
-            for i, fixture in enumerate(league_fixtures[:15], 1):
+            # Mostrar partidos de la página actual
+            for i, fixture in enumerate(fixtures_page, start=start_idx + 1):
                 fixture_info = fixture.get("fixture", {})
                 teams = fixture.get("teams", {})
 
@@ -204,11 +216,34 @@ class TelegramMenu:
                     callback_data=f"fixture_{fixture_id}"
                 )])
 
-            if len(league_fixtures) > 15:
+            # Botones de paginación
+            nav_buttons = []
+            if page > 1:
+                nav_buttons.append(InlineKeyboardButton(
+                    "⬅️ Anterior",
+                    callback_data=f"fixtures_page_{league_id}_{page-1}"
+                ))
+            if page < total_pages:
+                nav_buttons.append(InlineKeyboardButton(
+                    "➡️ Siguiente",
+                    callback_data=f"fixtures_page_{league_id}_{page+1}"
+                ))
+
+            if nav_buttons:
+                keyboard.append(nav_buttons)
+
+            # Mostrar info de paginación
+            if total_pages > 1:
                 keyboard.append([InlineKeyboardButton(
-                    f"... y {len(league_fixtures) - 15} partidos más",
+                    f"📄 Página {page}/{total_pages} ({total_fixtures} partidos)",
                     callback_data="no_action"
                 )])
+
+            # Botón para analizar TODA la liga (NUEVO)
+            keyboard.append([InlineKeyboardButton(
+                "📊 Analizar Toda la Liga (PDF)",
+                callback_data=f"analyze_league_{league_id}"
+            )])
 
         # Refresh and navigation buttons
         keyboard.append([InlineKeyboardButton("🔄 Refrescar Partidos (Consultar API)", callback_data=f"refresh_league_{league_id}")])
@@ -298,7 +333,9 @@ Selecciona la liga que deseas consultar:
 📅 Partidos de la Semana:
 """
 
-        markup = await self.get_fixtures_menu(league_id)
+        # Obtener página actual del context
+        page = context.user_data.get(f'fixtures_page_{league_id}', 1)
+        markup = await self.get_fixtures_menu(league_id, force_refresh=False, page=page)
 
         await update.callback_query.edit_message_text(
             message,

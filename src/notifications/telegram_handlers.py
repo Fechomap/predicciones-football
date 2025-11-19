@@ -72,6 +72,12 @@ class TelegramHandlers:
             elif callback_data.startswith("leagues_page_"):
                 await self._handle_leagues_pagination(update, context, callback_data)
 
+            elif callback_data.startswith("fixtures_page_"):
+                await self._handle_fixtures_pagination(update, context, callback_data)
+
+            elif callback_data.startswith("analyze_league_"):
+                await self._handle_analyze_full_league(update, context, callback_data)
+
             elif callback_data.startswith("fixture_"):
                 await self._handle_fixture_selection(update, context, callback_data)
 
@@ -581,6 +587,104 @@ Stake sugerido: {value.get('suggested_stake', 0)*100:.0f}% del bankroll
             parse_mode="HTML",
             reply_markup=self.menu.get_fixture_actions_menu(fixture_id)
         )
+
+    async def _handle_fixtures_pagination(self, update: Update, context: ContextTypes.DEFAULT_TYPE, callback_data: str):
+        """Handle fixtures pagination (Anterior/Siguiente)"""
+        # Parse: fixtures_page_{league_id}_{page}
+        parts = callback_data.split("_")
+        league_id = int(parts[2])
+        page = int(parts[3])
+
+        # Actualizar página en context
+        context.user_data[f'fixtures_page_{league_id}'] = page
+
+        # Mostrar menú con nueva página
+        await self.menu.show_fixtures_menu(update, context, league_id)
+
+    async def _handle_analyze_full_league(self, update: Update, context: ContextTypes.DEFAULT_TYPE, callback_data: str):
+        """Handle analyze full league button (genera PDF)"""
+        league_id = int(callback_data.replace("analyze_league_", ""))
+
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(
+            "📊 Analizando toda la liga...\n\n"
+            "Esto puede tomar un momento dependiendo del número de partidos.\n"
+            "Generando PDF...",
+            parse_mode="HTML"
+        )
+
+        try:
+            # Analizar toda la liga (usa cache)
+            result = await asyncio.to_thread(
+                self.bot_service.analysis_service.analyze_full_league_week,
+                league_id,
+                force_refresh=False  # Usa cache si disponible
+            )
+
+            if not result:
+                await update.callback_query.edit_message_text(
+                    "❌ No se pudo generar el análisis de la liga.",
+                    parse_mode="HTML"
+                )
+                return
+
+            # Enviar PDF
+            pdf_path = result['pdf_path']
+            summary = result['summary']
+
+            message = f"""
+📊 <b>ANÁLISIS COMPLETO DE {result['league_name']}</b>
+
+✅ Se analizaron {result['total_fixtures']} partidos
+
+📈 <b>Resumen:</b>
+⭐⭐⭐⭐⭐ Alta confianza: {summary['high_confidence']} partidos
+⭐⭐⭐ Media confianza: {summary['medium_confidence']} partidos
+⭐⭐ Baja confianza: {summary['low_confidence']} partidos
+
+💡 <b>Recomendación:</b> Revisar los primeros 3-5 partidos del PDF
+"""
+
+            await update.callback_query.edit_message_text(message, parse_mode="HTML")
+
+            # Enviar PDF
+            with open(pdf_path, 'rb') as pdf_file:
+                await update.callback_query.message.reply_document(
+                    document=pdf_file,
+                    filename=f"{result['league_name']}_resumen.pdf",
+                    caption="📄 Resumen semanal de la liga"
+                )
+
+            # Botones con top 3 partidos
+            if result['top_3']:
+                top_keyboard = []
+                for i, item in enumerate(result['top_3'], 1):
+                    fixture = item['fixture']
+                    teams = fixture.get('teams', {})
+                    stars = '⭐' * item['confidence']
+
+                    home = teams.get('home', {}).get('name', '')
+                    away = teams.get('away', {}).get('name', '')
+                    fixture_id = fixture.get('fixture', {}).get('id')
+
+                    top_keyboard.append([InlineKeyboardButton(
+                        f"{stars} {home} vs {away}",
+                        callback_data=f"fixture_{fixture_id}"
+                    )])
+
+                from telegram import InlineKeyboardMarkup
+                await update.callback_query.message.reply_text(
+                    "🎯 <b>Top 3 partidos con mayor confianza:</b>",
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(top_keyboard)
+                )
+
+        except Exception as e:
+            logger.error(f"Error analyzing full league: {e}", exc_info=True)
+            await update.callback_query.edit_message_text(
+                f"❌ Error generando análisis: {str(e)}",
+                parse_mode="HTML"
+            )
 
     def _generate_analysis_pdf(self, fixture: dict, analysis: dict) -> str:
         """

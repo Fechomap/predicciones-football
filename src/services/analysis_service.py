@@ -210,3 +210,79 @@ class AnalysisService:
                 'old_cached': old,
                 'cache_duration_hours': self.CACHE_DURATION_HOURS
             }
+
+    def analyze_full_league_week(
+        self,
+        league_id: int,
+        force_refresh: bool = False
+    ) -> Optional[Dict]:
+        """
+        Analiza TODOS los partidos de la semana de una liga
+
+        IMPORTANTE: Genera PDF con resumen completo
+
+        Args:
+            league_id: ID de la liga
+            force_refresh: Si True, ignora cache para todos los partidos
+
+        Returns:
+            Dict con 'pdf_path', 'results', 'summary'
+        """
+        from .fixtures_service import FixturesService
+        from ..utils.confidence_calculator import ConfidenceCalculator
+        from .pdf_service import PDFService
+
+        logger.info(f"📊 Analizando liga completa: {league_id} (force_refresh={force_refresh})")
+
+        # Obtener partidos de la semana
+        fixtures_service = FixturesService(self.bot_service.data_collector)
+        fixtures = fixtures_service.get_weekly_fixtures(league_id)
+
+        if not fixtures:
+            logger.warning(f"No fixtures found for league {league_id}")
+            return None
+
+        logger.info(f"📅 Analizando {len(fixtures)} partidos de la semana")
+
+        # Analizar cada partido
+        results = []
+        for fixture in fixtures:
+            try:
+                # Analizar (con cache)
+                analysis = self.get_or_create_analysis(fixture, force_refresh=force_refresh)
+
+                if analysis:
+                    # Calcular confianza
+                    confidence = ConfidenceCalculator.calculate(analysis)
+
+                    results.append({
+                        'fixture': fixture,
+                        'analysis': analysis,
+                        'confidence': confidence
+                    })
+            except Exception as e:
+                logger.error(f"Error analyzing fixture {fixture.get('fixture', {}).get('id')}: {e}")
+                continue
+
+        # Ordenar por confianza (mayor a menor)
+        results.sort(key=lambda x: x['confidence'], reverse=True)
+
+        # Generar PDF
+        league_info = fixtures[0].get('league', {}) if fixtures else {}
+        league_name = league_info.get('name', f'League {league_id}')
+
+        pdf_path = PDFService.generate_league_weekly_report(league_name, results)
+
+        return {
+            'league_id': league_id,
+            'league_name': league_name,
+            'total_fixtures': len(results),
+            'pdf_path': pdf_path,
+            'results': results,
+            'top_3': results[:3],  # Top 3 para botones
+            'summary': {
+                'high_confidence': sum(1 for r in results if r['confidence'] >= 4),
+                'medium_confidence': sum(1 for r in results if r['confidence'] == 3),
+                'low_confidence': sum(1 for r in results if r['confidence'] <= 2)
+            }
+        }
