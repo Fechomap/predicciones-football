@@ -650,7 +650,7 @@ Stake sugerido: {value.get('suggested_stake', 0)*100:.0f}% del bankroll
             result = await asyncio.to_thread(
                 self.bot_service.analysis_service.analyze_full_league_week,
                 league_id,
-                force_refresh=False  # Usa cache si disponible
+                force_refresh=True  # CAMBIO: Forzar refresh para asegurar datos frescos (15 días)
             )
 
             if not result:

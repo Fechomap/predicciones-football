@@ -234,12 +234,16 @@ class AnalysisService:
 
         logger.info(f"📊 Analizando liga completa: {league_id} (force_refresh={force_refresh})")
 
-        # Obtener partidos de la semana
+        # Obtener partidos de las próximas 2 semanas (15 días) para coincidir con menú Telegram
         fixtures_service = FixturesService(self.bot_service.data_collector)
-        fixtures = fixtures_service.get_weekly_fixtures(league_id)
+        # Usamos 360 horas (15 días) igual que el menú de Telegram
+        all_fixtures = fixtures_service.get_upcoming_fixtures(hours_ahead=360, force_refresh=force_refresh)
+        
+        # Filtrar solo los de esta liga
+        fixtures = [f for f in all_fixtures if f['league']['id'] == league_id]
 
         if not fixtures:
-            logger.warning(f"No fixtures found for league {league_id}")
+            logger.warning(f"No fixtures found for league {league_id} in next 15 days")
             return None
 
         logger.info(f"📅 Analizando {len(fixtures)} partidos de la semana")

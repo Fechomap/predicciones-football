@@ -24,25 +24,45 @@ logger = logging.getLogger(__name__)
 # Based on auto_map_all_teams.py analysis results
 
 MANUAL_MAPPINGS = [
-    # Premier League (API: 39, FootyStats: 1625)
-    # === PERFECT MATCHES (already mapped automatically) ===
-    # These are here for reference and will be updated if needed
+    # Premier League (API: 39, FootyStats: 12325)
+    # CORRECCIONES BASADAS EN auto_map_all_teams.py --save
 
-    # === GOOD/POOR MATCHES (need manual correction) ===
-    (66, None, "Aston Villa", 39, 0.0),  # NO MATCH in FootyStats - team not tracked
-    (55, None, "Brentford", 39, 0.0),  # NO MATCH in FootyStats - team not tracked
-    (51, None, "Brighton", 39, 0.0),  # NO MATCH in FootyStats - team not tracked
-    (63, None, "Leeds", 39, 0.0),  # NO MATCH in FootyStats - team not tracked
-    (34, 157, "Newcastle", 39, 0.72),  # Newcastle → Newcastle United FC (72% confidence, manual verify)
-    (65, None, "Nottingham Forest", 39, 0.0),  # NOT in FootyStats dataset
-    (746, None, "Sunderland", 39, 0.0),  # NOT in FootyStats dataset
-    (47, 92, "Tottenham", 39, 0.69),  # Tottenham → Tottenham Hotspur FC (69% confidence)
-    (48, 153, "West Ham", 39, 0.70),  # West Ham → West Ham United FC (70% confidence)
-    (39, 223, "Wolves", 39, 0.41),  # Wolves → Wolverhampton Wanderers FC (41% confidence, manual verify)
+    # ✅ Ya mapeados correctamente por auto_map (100% confianza):
+    # Arsenal, Aston Villa, Brentford, Chelsea, Crystal Palace, Everton,
+    # Fulham, Liverpool, Man City, Man United, Nottingham Forest
+
+    # 🔧 CORRECCIONES NECESARIAS (baja confianza o erróneas):
+    (51, 209, "Brighton", 39, 1.0),  # CORRECCIÓN: Brighton → Brighton & Hove Albion FC
+    (44, 145, "Burnley", 39, 1.0),  # CORRECCIÓN: Burnley → Burnley FC
+    (63, None, "Leeds", 39, 0.0),  # Leeds no está en FootyStats (descendido)
+    (746, None, "Sunderland", 39, 0.0),  # Sunderland no está en FootyStats (Championship)
+    (47, 92, "Tottenham", 39, 1.0),  # Tottenham → Tottenham Hotspur FC (verificado)
+    (48, 153, "West Ham", 39, 1.0),  # West Ham → West Ham United FC (verificado)
+    (39, 223, "Wolves", 39, 1.0),  # Wolves → Wolverhampton Wanderers FC (verificado)
+
+    # La Liga (API: 140, FootyStats: 12316)
+    # Ya mapeados automáticamente con buena confianza
+
+    # Bundesliga (API: 78, FootyStats: 12529)
+    # Ya mapeados automáticamente con buena confianza
+
+    # Serie A (API: 135, FootyStats: 12530)
+    (505, 470, "Inter", 135, 1.0),  # CORRECCIÓN: Inter → FC Internazionale Milano
+    (504, 473, "Verona", 135, 1.0),  # CORRECCIÓN: Verona → Hellas Verona FC
+
+    # Liga MX (API: 262, FootyStats: 12136)
+    # ✅ Ya mapeados correctamente por auto_map:
+    # Atlas, Atlético San Luis, Club América, Cruz Azul, FC Juárez,
+    # Guadalajara Chivas, León, Mazatlán, Monterrey, Necaxa,
+    # Pachuca, Puebla, Santos Laguna, Tigres UANL, Toluca
+
+    # 🔧 CORRECCIÓN CRÍTICA:
+    (2286, 1422, "U.N.A.M. - Pumas", 262, 1.0),  # CORRECCIÓN: Pumas → Club Universidad Nacional
+    (2290, 1427, "Club Queretaro", 262, 1.0),  # CORRECCIÓN: Querétaro FC (verificado)
+    (2280, 1418, "Club Tijuana", 262, 1.0),  # CORRECCIÓN: Tijuana (verificado)
 
     # NOTE: Teams with None for footystats_id are NOT in FootyStats database
     # This is EXPECTED for newly promoted or smaller teams
-    # FootyStats only tracks ~50-60 major teams per league
 ]
 
 
